@@ -6,9 +6,9 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
+from utils import load_recording, retrieve_parity_marks
 
 DEFAULT_PATH = Path(__file__).parent / "data" / "ASL_spont_01.npz"
-
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
@@ -26,26 +26,37 @@ def main():
     )
     args = p.parse_args()
 
-    data = np.load(args.path)
-    print(f"loaded {args.path.name}; fields: {list(data.files)}")
+    data, fs = load_recording(args.path)
+    print(f"loaded {args.path.name}; columns: {list(data.columns)}")
 
     channels = ["pressure", "flow", "pmus"]
-    fs = float(data["fs"])
-    nsamples = data[channels[0]].size
-    time = np.arange(nsamples) / fs
 
     parts = args.slice.split(":")
     start = int(parts[0])
     stop = int(parts[1])
-    interval = slice(start, stop)
-    t = time[interval] - time[interval][0]
     print(f"plotting samples [{start}:{stop}]")
+
+    data_slice = data.iloc[start:stop]
+    t = data_slice["time"].to_numpy() - data_slice["time"].iloc[0]
+    ins_marks, exp_marks = retrieve_parity_marks(data_slice["volume"].to_numpy() * 10)
+    t_ins = ins_marks / fs
+    t_exp = exp_marks / fs
+    print(f"marks in slice: {ins_marks.size} ins, {exp_marks.size} exp")
 
     fig, axes = plt.subplots(len(channels), 1, sharex=True)
     for ax, name in zip(axes, channels):
-        ax.plot(t, data[name][interval], "k", linewidth=0.8)
+        y = data_slice[name].to_numpy()
+        label = name if name == "pmus" else None
+        ax.plot(t, y, "k", linewidth=0.8, label=label)
+        ax.plot(t_ins, y[ins_marks], "^", color="tab:green", markersize=6)
+        ax.plot(t_exp, y[exp_marks], "v", color="tab:red", markersize=6)
         ax.set_ylabel(name)
         ax.grid(True)
+    axes[-1].plot(t, data_slice["pmus_mag"].to_numpy(), color="tab:blue", linewidth=0.8, label="pmus_mag")
+    axes[-1].legend(loc="upper right", fontsize=8)
+    axes[0].plot([], [], "^", color="tab:green", label="ins")
+    axes[0].plot([], [], "v", color="tab:red", label="exp")
+    axes[0].legend(loc="upper right", fontsize=8)
     axes[-1].set_xlabel("time [s]") # relative to slice start
     fig.suptitle(f"{args.path.name}  [{start}:{stop}]")
     fig.tight_layout()
