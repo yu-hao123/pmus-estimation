@@ -47,16 +47,16 @@ def main():
     for ax, name in zip(axes, channels):
         y = data_slice[name].to_numpy()
         label = name if name == "pmus" else None
-        ax.plot(t, y, "k", linewidth=0.8, label=label)
+        ax.plot(t, y, "k", linewidth=1, label=label)
         ax.plot(t_ins, y[ins_marks], "^", color="tab:green", markersize=6)
         ax.plot(t_exp, y[exp_marks], "v", color="tab:red", markersize=6)
         ax.set_ylabel(name)
         ax.grid(True)
-    axes[-1].plot(t, data_slice["pmus_mag"].to_numpy(), color="tab:blue", linewidth=0.8, label="pmus_mag")
-    axes[-1].legend(loc="upper right", fontsize=8)
+    axes[-1].plot(t, data_slice["pmus_mag"].to_numpy(), color="tab:blue", label="pmus_mag")
+    axes[-1].legend(loc="upper right", fontsize=10)
     axes[0].plot([], [], "^", color="tab:green", label="ins")
     axes[0].plot([], [], "v", color="tab:red", label="exp")
-    axes[0].legend(loc="upper right", fontsize=8)
+    axes[0].legend(loc="upper right", fontsize=10)
     axes[-1].set_xlabel("time [s]") # relative to slice start
     fig.suptitle(f"{args.path.name}  [{start}:{stop}]")
     fig.tight_layout()
