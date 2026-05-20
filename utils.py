@@ -55,18 +55,22 @@ def extract_single_cycle(
     next_ins_mark: int,
     exp_mark: int,
     peep: float,
-    offset: int = 30,
+    offset: int = 29,
 ) -> Cycle:
     start = ins_mark - offset
     stop = next_ins_mark - offset
     sliced = df.iloc[start:stop]
+
+    flow = sliced["flow"].to_numpy()
+    pressure = sliced["pressure"].to_numpy()
+    volume = sliced["volume"].to_numpy()
 
     flow = fir_filter(8, 0.2, fs, sliced["flow"].to_numpy())
     pressure = fir_filter(8, 0.2, fs, sliced["pressure"].to_numpy())
     volume = fir_filter(8, 0.2, fs, sliced["volume"].to_numpy())
 
     pressure = pressure - peep
-    volume = volume - volume[offset]
+    volume = volume - volume[offset-1]
 
     exp_start = exp_mark - ins_mark + offset
     insexp = np.ones(pressure.size)
