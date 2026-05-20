@@ -58,26 +58,17 @@ def pmus_qp_joint(cycle: Cycle, verbose: bool = False) -> tuple[np.ndarray, floa
     env.dispose()
     return pmus_hat, R_hat, E_hat
 
-def pmus_miqp_fixed(
-    cycle: Cycle, R: float, E: float,
-    tau_soe: int = 50, epsilon: float = 1e-3,
-    l2_reg: bool = True, verbose: bool = False,
-) -> tuple[np.ndarray, np.ndarray]:
-    flow_ml_s = cycle.flow * 1000.0 / 60.0
-    volume = cycle.volume
-    pressure = cycle.pressure
-    n = pressure.size
+
+def define_constraints(
+    model: gp.Model, insexp: np.ndarray,
+    tau_soe: int, epsilon: float,
+) -> tuple[gp.MVar, gp.MVar]:
+    n = insexp.size
     ns = 2  # no initial delay for now
 
     # k_soe: 0-based first expiratory sample (where insexp drops 1 → 0)
-    diffs = np.diff(cycle.insexp)
+    diffs = np.diff(insexp)
     k_soe = int(np.where(diffs <= -0.5)[0][0]) + 1
-
-    env = gp.Env(empty=True)
-    env.setParam("OutputFlag", 1 if verbose else 0)
-    env.start()
-    model = gp.Model(env=env)
-    model.Params.TimeLimit = 60.0
 
     pmus = model.addMVar(n, lb=-20.0, ub=1.0, name="pmus")
     tik = model.addMVar((n, ns), vtype=GRB.BINARY, name="tik")
@@ -130,6 +121,28 @@ def pmus_miqp_fixed(
             name=f"reg3_{i}"
         )
 
+    return pmus, tik
+
+
+def pmus_miqp_fixed(
+    cycle: Cycle, R: float, E: float,
+    tau_soe: int = 50, epsilon: float = 1e-3,
+    l2_reg: bool = True, verbose: bool = False,
+) -> tuple[np.ndarray, np.ndarray]:
+
+    flow_ml_s = cycle.flow * 1000.0 / 60.0
+    volume = cycle.volume
+    pressure = cycle.pressure
+
+    env = gp.Env(empty=True)
+    env.setParam("OutputFlag", 1 if verbose else 0)
+    env.start()
+    model = gp.Model(env=env)
+    model.Params.TimeLimit = 60.0
+
+    # gp.MVar, not numpy arrays
+    pmus, tik = define_constraints(model, cycle.insexp, tau_soe, epsilon)
+
     residual = pressure - pmus - R * flow_ml_s - E * volume
     cost = residual @ residual
     if l2_reg:
@@ -139,7 +152,7 @@ def pmus_miqp_fixed(
     model.optimize()
 
     pmus_hat = np.asarray(pmus.X).ravel()
-    switching_times = (weights @ tik.X).astype(int)
+    switching_times = (np.arange(pmus_hat.size) @ tik.X).astype(int)
     model.dispose()
     env.dispose()
     return pmus_hat, switching_times
@@ -158,6 +171,8 @@ if __name__ == "__main__":
         peep=5.0, offset=30,
     )
 
+    print(f"n = {cycle.pressure.size}")
+    print(cycle.pressure)
     # applying least squares in real pmus waveform
     flow_ml_s = cycle.flow / 60.0 * 1000.0
     A = np.column_stack([flow_ml_s, cycle.volume])
@@ -166,7 +181,7 @@ if __name__ == "__main__":
     print(f"LSE true (external): R = {R_lse * 1000:.2f}, C= {1 / (E_lse):.2f}")
 
     pmus_hat = pmus_qp_fixed_RE(cycle, R_lse, E_lse)
-    pmus_fixed_miqp, switches = pmus_miqp_fixed(cycle, R_lse, E_lse, verbose=True)
+    pmus_fixed_miqp, switches = pmus_miqp_fixed(cycle, R_lse, E_lse)
     cost_miqp = np.linalg.norm(
         cycle.pressure - pmus_fixed_miqp - R_lse * flow_ml_s - E_lse * cycle.volume
     )

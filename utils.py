@@ -55,7 +55,7 @@ def extract_single_cycle(
     next_ins_mark: int,
     exp_mark: int,
     peep: float,
-    offset: int = 29,
+    offset: int = 30,
 ) -> Cycle:
     start = ins_mark - offset
     stop = next_ins_mark - offset
@@ -70,7 +70,7 @@ def extract_single_cycle(
     volume = fir_filter(8, 0.2, fs, sliced["volume"].to_numpy())
 
     pressure = pressure - peep
-    volume = volume - volume[offset-1]
+    volume = volume - volume[offset]
 
     exp_start = exp_mark - ins_mark + offset
     insexp = np.ones(pressure.size)
