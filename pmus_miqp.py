@@ -31,6 +31,34 @@ def pmus_qp_fixed_RE(
     return pmus_hat
 
 
+def pmus_qp_joint(cycle: Cycle, verbose: bool = False) -> tuple[np.ndarray, float, float]:
+    flow_ml_s = cycle.flow * 1000.0 / 60.0
+
+    volume = cycle.volume
+    pressure = cycle.pressure
+    nsamples = pressure.size
+
+    env = gp.Env(empty=True)
+    env.setParam("OutputFlag", 1 if verbose else 0)
+    env.start()
+    model = gp.Model(env=env)
+    model.Params.TimeLimit = 60.0
+
+    pmus = model.addMVar(nsamples, lb=-25.0, ub=1.0, name="pmus")
+    RE = model.addMVar(2, lb=[0.0, 0.005], ub=[0.1, 1.0], name="RE")
+
+    A = np.column_stack([flow_ml_s, volume]) # (N, 2)
+    residual = pressure - pmus - A @ RE
+    model.setObjective(residual @ residual, GRB.MINIMIZE)
+    model.optimize()
+
+    pmus_hat = np.asarray(pmus.X).ravel()
+    R_hat, E_hat = float(RE.X[0]), float(RE.X[1])
+    model.dispose()
+    env.dispose()
+    return pmus_hat, R_hat, E_hat
+
+
 if __name__ == "__main__":
     from pathlib import Path
     import matplotlib.pyplot as plt
@@ -50,9 +78,10 @@ if __name__ == "__main__":
     A = np.column_stack([flow_ml_s, cycle.volume])
     b = cycle.pressure - cycle.pmus
     (R_lse, E_lse), *_ = np.linalg.lstsq(A, b, rcond=None)
-    print(f"LSE true (external): R = {R_lse * 1000:.2f}, C= {1000 / (E_lse * 1000):.2f}")
+    print(f"LSE true (external): R = {R_lse * 1000:.2f}, C= {1 / (E_lse):.2f}")
 
     pmus_hat = pmus_qp_fixed_RE(cycle, R_lse, E_lse, verbose=True)
+    pmus_joint, R_joint, E_joint = pmus_qp_joint(cycle, verbose=True)
 
     t = cycle.time - cycle.time[0]
     fig, axes = plt.subplots(3, 1, sharex=True, figsize=(8, 8))
@@ -65,6 +94,7 @@ if __name__ == "__main__":
 
     axes[2].plot(t, cycle.pmus, "k", label="pmus_true")
     axes[2].plot(t, pmus_hat, "tab:red", label="pmus_hat (QP solver)")
+    axes[2].plot(t, pmus_joint, "tab:green", label="pmus_joint (no switching)")
     axes[2].set_ylabel("pmus [cmH2O]"); axes[2].grid(True)
     axes[2].set_xlabel("time [s]")
     axes[2].legend(loc="lower right", fontsize=10)
