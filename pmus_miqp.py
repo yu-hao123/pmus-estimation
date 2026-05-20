@@ -5,7 +5,7 @@ from gurobipy import GRB
 from utils import Cycle
 
 # quadratic optimization demo (minimal gurobi setup)
-def pmus_qp_fixed_RE(
+def pmus_qp_fixed(
     cycle: Cycle, R: float, E: float, verbose: bool = False
 ) -> np.ndarray:
     flow_ml_s = cycle.flow * 1000.0 / 60.0 # converting from L/min to mL/s
@@ -157,6 +157,47 @@ def pmus_miqp_fixed(
     env.dispose()
     return pmus_hat, switching_times
 
+
+def pmus_miqp_full(
+    cycle: Cycle,
+    tau_soe: int = 50, epsilon: float = 1e-3,
+    l2_reg: bool = True, verbose: bool = False,
+) -> tuple[np.ndarray, np.ndarray, float, float]:
+
+    flow_ml_s = cycle.flow * 1000.0 / 60.0
+    volume = cycle.volume
+    pressure = cycle.pressure
+
+    env = gp.Env(empty=True)
+    env.setParam("OutputFlag", 1 if verbose else 0)
+    env.start()
+    model = gp.Model(env=env)
+    model.Params.TimeLimit = 60.0
+
+    # gp.MVar, not numpy arrays
+    pmus, tik = define_constraints(model, cycle.insexp, tau_soe, epsilon)
+
+    # R, E are MVar, jointly optimized with pmus and tik
+    # ranges R: [0, 100], C: [1, 200]
+    RE = model.addMVar(2, lb=[0.0, 0.005], ub=[0.1, 1.0], name="RE")
+
+    # matrix form
+    A = np.column_stack([flow_ml_s, volume])  # (n, 2)
+    residual = pressure - pmus - A @ RE
+    cost = residual @ residual
+    if l2_reg:
+        cost = cost + 1e-3 * (pmus @ pmus)
+    model.setObjective(cost, GRB.MINIMIZE)
+    model.optimize()
+
+    pmus_hat = np.asarray(pmus.X).ravel()
+    switching_times = (np.arange(pmus_hat.size) @ tik.X).astype(int)
+    R_hat, E_hat = float(RE.X[0]), float(RE.X[1])
+    model.dispose()
+    env.dispose()
+    return pmus_hat, switching_times, R_hat, E_hat
+
+
 if __name__ == "__main__":
     from pathlib import Path
     import matplotlib.pyplot as plt
@@ -172,19 +213,25 @@ if __name__ == "__main__":
     )
 
     print(f"n = {cycle.pressure.size}")
-    print(cycle.pressure)
     # applying least squares in real pmus waveform
     flow_ml_s = cycle.flow / 60.0 * 1000.0
     A = np.column_stack([flow_ml_s, cycle.volume])
     b = cycle.pressure - cycle.pmus
     (R_lse, E_lse), *_ = np.linalg.lstsq(A, b, rcond=None)
-    print(f"LSE true (external): R = {R_lse * 1000:.2f}, C= {1 / (E_lse):.2f}")
+    print(f"LSE true (external): R = {R_lse * 1000:.2f}, C = {1 / (E_lse):.2f}")
 
-    pmus_hat = pmus_qp_fixed_RE(cycle, R_lse, E_lse)
-    pmus_fixed_miqp, switches = pmus_miqp_fixed(cycle, R_lse, E_lse)
-    cost_miqp = np.linalg.norm(
-        cycle.pressure - pmus_fixed_miqp - R_lse * flow_ml_s - E_lse * cycle.volume
+    pmus_qp = pmus_qp_fixed(cycle, R_lse, E_lse)
+    pmus_fixed, switches = pmus_miqp_fixed(cycle, R_lse, E_lse)
+    cost_fixed = np.linalg.norm(
+        cycle.pressure - pmus_fixed - R_lse * flow_ml_s - E_lse * cycle.volume
     )
+
+    pmus_miqp, _, R_hat, E_hat = pmus_miqp_full(cycle)
+    cost_miqp = np.linalg.norm(
+        cycle.pressure - pmus_miqp - R_hat * flow_ml_s - E_hat * cycle.volume
+    )
+    print(f"MIQP: R = {R_hat * 1000:.2f}, C = {1 / E_hat:.2f}")
+    print(f"||paw - paw_hat|| (fixed) = {cost_fixed:.4f}")
     print(f"||paw - paw_hat|| = {cost_miqp:.4f}")
 
     t = cycle.time - cycle.time[0]
@@ -197,18 +244,20 @@ if __name__ == "__main__":
     axes[1].set_ylabel("flow [L/min]"); axes[1].grid(True)
 
     axes[2].plot(t, cycle.pmus, "k", label="pmus_true")
-    axes[2].plot(t, pmus_hat, "tab:red", label="pmus_hat (QP solver)")
-    axes[2].plot(t, pmus_fixed_miqp, "tab:purple", label="pmus_miqp_fixed")
+    axes[2].plot(t, pmus_qp, "tab:red", label="pmus_qp (QP solver)")
+    axes[2].plot(t, pmus_fixed, "tab:purple", label="pmus_miqp_fixed")
+    axes[2].plot(t, pmus_miqp, "tab:green", label="pmus_miqp")
     axes[2].set_ylabel("pmus [cmH2O]"); axes[2].grid(True)
     axes[2].set_xlabel("time [s]")
 
     for ax in axes:
         for s in switches:
             ax.axvline(t[s], color="tab:orange", linestyle="--", linewidth=1.0)
-    axes[2].plot([], [], color="tab:orange", linestyle="--",
-                 linewidth=1.0, label="switches (MIQP)")
+    axes[2].plot([], [], color="tab:orange", label="binary switches (MIQP)")
     axes[2].legend(loc="lower right", fontsize=10)
 
-    fig.suptitle(f"Demo gurobi QP setup R={R_lse*1000:.2f}, C={1000/(E_lse*1000):.2f}")
+    fig.suptitle(
+        f"MIQP R = {R_hat*1000:.2f}, C = {1/E_hat:.2f}, J = {cost_miqp:.2f}"
+    )
     fig.tight_layout()
     plt.show()
