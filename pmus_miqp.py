@@ -96,22 +96,27 @@ def define_constraints(
         for i in range(1, n):
             model.addConstr(c[i, s] - c[i - 1, s] == tik[i, s], name=f"c_step_{i}_s{s}")
 
-    # region contraints: c[i, s] activates the per-region monotonic shape rule on pmus
-    for i in range(n - 1):
-        if initial_delay:
+    # flat-zero regions, only when initial_delay
+    if initial_delay:
+        for i in range(n):
             # region 0 (delay, before switch 0): pmus == 0
-            # c[i, 0] == 0 -> pmus[i] = pmus[i+1] = 0
+            # c[i, 0] == 0 -> pmus[i] = 0
             model.addGenConstrIndicator(
                 c[i, 0].item(), 0,
                 pmus[i] == 0,
-                name=f"reg0a_{i}"
+                name=f"reg0_{i}"
             )
+            # region 3 (exhalation delay, after switch 2): pmus == 0
+            # c[i, 2] == 1 -> pmus[i] = 0
             model.addGenConstrIndicator(
-                c[i, 0].item(), 0,
-                pmus[i + 1] == 0,
-                name=f"reg0b_{i}"
+                c[i, 2].item(), 1,
+                pmus[i] == 0,
+                name=f"reg3_{i}"
             )
 
+    # monotonicity regions: c[i, s] activates the shape rule on pmus
+    for i in range(n - 1):
+        if initial_delay:
             # region 1 (decreasing ramp, between switch 0 and 1)
             # need aux binary because activation is a difference of binaries
             b_dec = model.addVar(vtype=GRB.BINARY, name=f"b_dec_{i}")
@@ -129,19 +134,6 @@ def define_constraints(
                 b_inc, 1,
                 pmus[i] + epsilon <= pmus[i + 1],
                 name=f"reg2_{i}"
-            )
-
-            # region 3 (exhalation delay, after switch 2): pmus == 0
-            # c[i, 2] == 1 -> pmus[i] = pmus[i+1] = 0
-            model.addGenConstrIndicator(
-                c[i, 2].item(), 1,
-                pmus[i] == 0,
-                name=f"reg3a_{i}"
-            )
-            model.addGenConstrIndicator(
-                c[i, 2].item(), 1,
-                pmus[i + 1] == 0,
-                name=f"reg3b_{i}"
             )
         else:
             # region 1 (before switch 0): pmus decreasing
@@ -178,7 +170,7 @@ def pmus_miqp_fixed(
     cycle: Cycle, R: float, E: float,
     tau_soe: int = 50, epsilon: float = 1e-3,
     l2_reg: bool = True,
-    initial_delay: bool = False, delay_length: int = 20,
+    initial_delay_length: int = 0,
     verbose: bool = False,
 ) -> tuple[np.ndarray, np.ndarray, float]:
 
@@ -187,9 +179,9 @@ def pmus_miqp_fixed(
     pressure = cycle.pressure
     insexp = cycle.insexp
 
-    if initial_delay:
+    if initial_delay_length > 0:
         # prepend a flat-zero region to all waveforms
-        pad = np.zeros(delay_length)
+        pad = np.zeros(initial_delay_length)
         flow_ml_s = np.concatenate([pad, flow_ml_s])
         volume = np.concatenate([pad, volume])
         pressure = np.concatenate([pad, pressure])
@@ -202,7 +194,10 @@ def pmus_miqp_fixed(
     model.Params.TimeLimit = 60.0
 
     # gp.MVar, not numpy arrays
-    pmus, tik = define_constraints(model, insexp, tau_soe, epsilon, initial_delay)
+    pmus, tik = define_constraints(
+        model, insexp, tau_soe, epsilon,
+        initial_delay = (initial_delay_length > 0),
+    )
 
     residual = pressure - pmus - R * flow_ml_s - E * volume
     cost = residual @ residual
@@ -224,7 +219,7 @@ def pmus_miqp_full(
     cycle: Cycle,
     tau_soe: int = 50, epsilon: float = 1e-3,
     l2_reg: bool = True,
-    initial_delay: bool = False, delay_length: int = 20,
+    initial_delay_length: int = 0,
     verbose: bool = False,
 ) -> tuple[np.ndarray, np.ndarray, float, float, float]:
 
@@ -233,10 +228,10 @@ def pmus_miqp_full(
     pressure = cycle.pressure
     insexp = cycle.insexp
 
-    if initial_delay:
+    if initial_delay_length > 0:
         # prepend a flat-zero region to all waveforms; the helper will
         # add the matching pre-inspiratory region constraint
-        pad = np.zeros(delay_length)
+        pad = np.zeros(initial_delay_length)
         flow_ml_s = np.concatenate([pad, flow_ml_s])
         volume = np.concatenate([pad, volume])
         pressure = np.concatenate([pad, pressure])
@@ -249,7 +244,10 @@ def pmus_miqp_full(
     model.Params.TimeLimit = 60.0
 
     # gp.MVar, not numpy arrays
-    pmus, tik = define_constraints(model, insexp, tau_soe, epsilon, initial_delay)
+    pmus, tik = define_constraints(
+        model, insexp, tau_soe, epsilon,
+        initial_delay=(initial_delay_length > 0),
+    )
 
     # R, E are MVar, jointly optimized with pmus and tik
     # ranges R: [0, 100], C: [1, 200]
@@ -296,18 +294,21 @@ if __name__ == "__main__":
     print(f"LSE true (external): R = {R_lse * 1000:.2f}, C = {1 / (E_lse):.2f}")
 
     pmus_qp = pmus_qp_fixed(cycle, R_lse, E_lse)
-    pmus_fixed, switches, t_fixed = pmus_miqp_fixed(cycle, R_lse, E_lse)
+    pmus_fixed, _, solver_time_fixed = pmus_miqp_fixed(cycle, R_lse, E_lse)
     cost_fixed = np.linalg.norm(
         cycle.pressure - pmus_fixed - R_lse * flow_ml_s - E_lse * cycle.volume
     )
 
-    pmus_miqp, _, R_hat, E_hat, t_full = pmus_miqp_full(cycle)
+    delay = 0
+    pmus_miqp, switches, R_hat, E_hat, solver_time_miqp = pmus_miqp_full(cycle, initial_delay_length=delay)
+    pmus_miqp = pmus_miqp[delay:]
+    switches = switches - delay
     cost_miqp = np.linalg.norm(
         cycle.pressure - pmus_miqp - R_hat * flow_ml_s - E_hat * cycle.volume
     )
     print(f"MIQP: R = {R_hat * 1000:.2f}, C = {1 / E_hat:.2f}")
-    print(f"||paw - paw_hat|| (fixed) = {cost_fixed:.4f}  ({t_fixed:.2f}s)")
-    print(f"||paw - paw_hat|| = {cost_miqp:.4f}  ({t_full:.2f}s)")
+    print(f"||paw - paw_hat|| (fixed) = {cost_fixed:.4f} ({solver_time_fixed:.2f}s)")
+    print(f"||paw - paw_hat|| = {cost_miqp:.4f} ({solver_time_miqp:.2f}s)")
 
     t = cycle.time - cycle.time[0]
     fig, axes = plt.subplots(3, 1, sharex=True, figsize=(8, 8))
