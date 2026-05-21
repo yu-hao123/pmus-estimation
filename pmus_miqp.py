@@ -281,13 +281,20 @@ if __name__ == "__main__":
     import matplotlib.pyplot as plt
     from utils import load_recording, retrieve_parity_marks, extract_single_cycle
 
+    CYCLE_IDX = 345
+    CYCLE_IDX = 2420 # reverse trigger / early cycling?
+    #CYCLE_IDX = 8099
+    #CYCLE_IDX = 13775 # late cycling
+    TAU_SOE = 50
+
     data, fs = load_recording(Path(__file__).parent / "data" / "ASL_spont_01.npz")
     ins_marks, exp_marks = retrieve_parity_marks(data["volume"].to_numpy() * 10)
     cycle = extract_single_cycle(
         df=data, fs=fs,
-        ins_mark=int(ins_marks[8098]), next_ins_mark=int(ins_marks[8099]),
-        exp_mark=int(exp_marks[8098]),
-        peep=5.0, offset=30,
+        ins_mark=int(ins_marks[CYCLE_IDX]),
+        next_ins_mark=int(ins_marks[CYCLE_IDX+1]),
+        exp_mark=int(exp_marks[CYCLE_IDX]),
+        peep=5.0, offset=50,
     )
 
     print(f"n = {cycle.pressure.size}")
@@ -305,7 +312,7 @@ if __name__ == "__main__":
     )
 
     delay = 0
-    pmus_miqp, switches, R_hat, E_hat, solver_time_miqp = pmus_miqp_full(cycle, initial_delay_length=delay)
+    pmus_miqp, switches, R_hat, E_hat, solver_time_miqp = pmus_miqp_full(cycle, initial_delay_length=delay, tau_soe=TAU_SOE)
     pmus_miqp = pmus_miqp[delay:]
     switches = switches - delay
     cost_miqp = np.linalg.norm(
@@ -318,23 +325,27 @@ if __name__ == "__main__":
     t = cycle.time - cycle.time[0]
     fig, axes = plt.subplots(3, 1, sharex=True, figsize=(8, 8))
 
-    axes[0].plot(t, cycle.pressure, "k")
+    paw_est = pmus_miqp + R_hat * flow_ml_s + E_hat * cycle.volume
+    axes[0].plot(t, cycle.pressure, "k", label="paw")
+    axes[0].plot(t, paw_est, "tab:orange", label="paw_est (MIQP)")
     axes[0].set_ylabel("paw [cmH2O]"); axes[0].grid(True)
+    axes[0].legend(loc="upper right", fontsize=10)
 
     axes[1].plot(t, cycle.flow, "k")
     axes[1].set_ylabel("flow [L/min]"); axes[1].grid(True)
 
     axes[2].plot(t, cycle.pmus, "k", label="pmus_true")
-    axes[2].plot(t, pmus_qp, "tab:red", label="pmus_qp (QP solver)")
-    axes[2].plot(t, pmus_fixed, "tab:purple", label="pmus_miqp_fixed")
-    axes[2].plot(t, pmus_miqp, "tab:green", label="pmus_miqp")
+    axes[2].plot(t, cycle.pmus_mag, "tab:purple", label="pmus_mag_AI")
+    axes[2].plot(t, pmus_qp, "tab:green", label="pmus_qp (QP solver)")
+    axes[2].plot(t, pmus_fixed, "k", label="pmus_miqp_fixed")
+    axes[2].plot(t, pmus_miqp, "tab:orange", label="pmus_miqp")
     axes[2].set_ylabel("pmus [cmH2O]"); axes[2].grid(True)
     axes[2].set_xlabel("time [s]")
 
     for ax in axes:
         for s in switches:
-            ax.axvline(t[s], color="tab:orange", linestyle="--", linewidth=1.0)
-    axes[2].plot([], [], color="tab:orange", label="binary switches (MIQP)")
+            ax.axvline(t[s], color="tab:red", linestyle="--", linewidth=1.0)
+    axes[2].plot([], [], color="tab:red", label="binary switches (MIQP)")
     axes[2].legend(loc="lower right", fontsize=10)
 
     fig.suptitle(

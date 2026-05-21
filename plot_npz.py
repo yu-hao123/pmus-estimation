@@ -92,7 +92,7 @@ def main():
         if k is None:
             return f"(x, y) = ({x:.2f}, {y:.2f})"
         return (
-            f"(x, y) = ({x:.2f}, {y:.2f})"
+            f"(x, y) = ({x:.2f}, {y:.2f}) | "
             f"nearest {all_type[k]} #{all_idx[k]} @ t = {all_t[k]:.2f}s"
         )
     for ax in axes:
