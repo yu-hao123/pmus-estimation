@@ -166,11 +166,15 @@ def define_constraints(
     return pmus, tik
 
 
+# R is expected in (cmH2O.s/mL)
+# E is expected in cmH2O/mL
 def pmus_miqp_fixed(
     cycle: Cycle, R: float, E: float,
-    tau_soe: int = 50, epsilon: float = 1e-3,
+    tau_soe: int = 50,
+    epsilon: float = 1e-3,
     l2_reg: bool = True,
     initial_delay_length: int = 0,
+    threads: int = 0,
     verbose: bool = False,
 ) -> tuple[np.ndarray, np.ndarray, float]:
 
@@ -192,6 +196,7 @@ def pmus_miqp_fixed(
     env.start()
     model = gp.Model(env=env)
     model.Params.TimeLimit = 60.0
+    model.Params.Threads = threads
 
     # gp.MVar, not numpy arrays
     pmus, tik = define_constraints(
