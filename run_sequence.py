@@ -64,10 +64,21 @@ def solve_cycle(cycle: Cycle, k: int, tau: int) -> dict:
     flow_ml_s = cycle.flow * 1000.0 / 60.0
     paw_est = pmus_hat + R_hat * flow_ml_s + E_hat * cycle.volume
     residual = float(np.linalg.norm(cycle.pressure - paw_est))
+
+    A = np.column_stack([flow_ml_s, cycle.volume])
+    b = cycle.pressure - cycle.pmus
+    (R_lse, E_lse), *_ = np.linalg.lstsq(A, b, rcond=None)
+
+    R_display = R_hat * 1000.0
+    C_display = 1.0 / E_hat
+    R_lse_display = R_lse * 1000.0
+    C_lse_display = 1.0 / E_lse
+
     print(
-        f"cycle #{k:2d}: R = {R_hat*1000:.2f}, C = {1/E_hat:.2f}, "
+        f"cycle #{k:2d}: R = {R_display:.2f}, C = {C_display:.2f}, "
         f"J = {residual:.3f} ({solver_time:.1f}s)"
     )
+    n = cycle.pressure.size
     return {
         "time":      cycle.time,
         "pressure":  cycle.pressure,
@@ -75,6 +86,11 @@ def solve_cycle(cycle: Cycle, k: int, tau: int) -> dict:
         "flow":      cycle.flow,
         "pmus":      cycle.pmus,
         "pmus_miqp": pmus_hat,
+        "R":         np.full(n, R_display),
+        "C":         np.full(n, C_display),
+        "J":         np.full(n, residual),
+        "R_lse":     np.full(n, R_lse_display),
+        "C_lse":     np.full(n, C_lse_display),
     }
 
 
@@ -83,7 +99,13 @@ def plot_segments(segments: list[dict], title: str) -> None:
     t = cat("time") - segments[0]["time"][0]
     cycle_boundaries = np.cumsum([s["pressure"].size for s in segments])
 
-    fig, axes = plt.subplots(3, 1, sharex=True, figsize=(11, 7))
+    R = cat("R")
+    C = cat("C")
+    J = cat("J")
+    R_lse = cat("R_lse")
+    C_lse = cat("C_lse")
+
+    fig, axes = plt.subplots(5, 1, sharex=True, figsize=(11, 10))
     axes[0].plot(t, cat("pressure"), "k", label="paw")
     axes[0].plot(t, cat("paw_est"), "tab:orange", label="paw_est (MIQP)")
     axes[0].set_ylabel("paw [cmH2O]"); axes[0].grid(True)
@@ -95,12 +117,34 @@ def plot_segments(segments: list[dict], title: str) -> None:
     axes[2].plot(t, cat("pmus"), "k", label="pmus_ASL")
     axes[2].plot(t, cat("pmus_miqp"), "tab:orange", label="pmus_miqp")
     axes[2].set_ylabel("pmus [cmH2O]"); axes[2].grid(True)
-    axes[2].set_xlabel("time [s]")
     axes[2].legend(loc="upper right", fontsize=9)
+
+    axes[3].plot(t, R, "tab:orange", label="R (MIQP)")
+    axes[3].plot(t, R_lse, "r--", label="R_lse")
+    axes[3].set_ylabel("R [cmH2O*s/L]"); axes[3].grid(True)
+    axes[3].set_ylim(6, 12)
+    axes[3].legend(loc="upper right", fontsize=9)
+
+    axes[4].plot(t, C, "tab:orange", label="C (MIQP)")
+    axes[4].plot(t, C_lse, "r--", label="C_lse")
+    axes[4].set_ylabel("C [mL/cmH2O]"); axes[4].grid(True)
+    axes[4].set_ylim(25, 40)
+    axes[4].set_xlabel("time [s]")
+    axes[4].legend(loc="upper right", fontsize=9)
 
     for ax in axes:
         for b in cycle_boundaries[:-1]:
             ax.axvline(t[b], color="tab:gray", linestyle=":", linewidth=0.8)
+
+    def format_coord(x, y):
+        i = int(np.clip(np.searchsorted(t, x), 0, len(t) - 1))
+        return (
+            f"t={x:.3f} s, y={y:.3f}, "
+            f"R={R[i]:.2f}, C={C[i]:.2f}, J={J[i]:.3f}"
+        )
+
+    for ax in axes:
+        ax.format_coord = format_coord
 
     fig.suptitle(title)
     fig.tight_layout()
