@@ -363,7 +363,6 @@ if __name__ == "__main__":
     from utils import load_recording, get_ins_exp_marks, extract_single_cycle
 
     DEFAULT_PATH = Path(__file__).parent / "data" / "ASL_spont_01.npz"
-    TAU_SOE = 50
     INITIAL_DELAY = 0
     PEEP = 5.0
     OFFSET = 30
@@ -377,16 +376,21 @@ if __name__ == "__main__":
         "--cycle", type=int, default=8098,
         help="cycle index (default: 8098)",
     )
+    parser.add_argument(
+        "--tsoe", type=float, default=0.5,
+        help="tau_soe in seconds (default: 0.5)",
+    )
     args = parser.parse_args()
+    data, fs = load_recording(args.path)
 
     # interesting cycles in ASL_spont_01
     # 345, 2420 -> RT, EC
     # 8098 -> reference
     # 13775 -> LC
 
+    TAU_SOE = int(args.tsoe * fs)
     CYCLE_IDX = args.cycle
 
-    data, fs = load_recording(args.path)
     ins_marks, exp_marks = get_ins_exp_marks(args.path, data, fs)
     cycle = extract_single_cycle(
         df=data,
@@ -442,15 +446,24 @@ if __name__ == "__main__":
     axes[2].set_ylabel("pmus [cmH2O]"); axes[2].grid(True)
     axes[2].set_xlabel("time [s]")
 
-    for ax in axes:
+    ins_sample = OFFSET
+    exp_sample = int(np.where(np.diff(cycle.insexp) <= -0.5)[0][0]) + 1
+
+    channels = [cycle.pressure, cycle.flow, cycle.pmus]
+    for ax, y in zip(axes, channels):
+        ax.plot(t[ins_sample], y[ins_sample], "^", color="tab:green", markersize=8)
+        ax.plot(t[exp_sample], y[exp_sample], "v", color="tab:red", markersize=8)
         for s in switches:
             ax.axvline(t[s], color="tab:red", linestyle="--", linewidth=1.0)
+    axes[1].plot([], [], "^", color="tab:green", label="ins mark")
+    axes[1].plot([], [], "v", color="tab:red", label="exp mark")
+    axes[1].legend(loc="lower right", fontsize=10)
     axes[2].plot([], [], color="tab:red", label="binary switches (MIQP)")
     axes[2].legend(loc="lower right", fontsize=10)
 
     fig.canvas.manager.set_window_title(f"{args.path.name}")
     fig.suptitle(
-        f"cycle #{CYCLE_IDX}: MIQP R = {R_hat*1000:.2f}, C = {1/E_hat:.2f}, J = {cost_miqp:.2f}"
+        f"cycle #{CYCLE_IDX}: R = {R_hat*1000:.2f}, C = {1/E_hat:.2f}, J = {cost_miqp:.2f}"
     )
     fig.tight_layout()
     plt.show()
