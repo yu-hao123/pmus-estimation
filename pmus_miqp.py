@@ -357,21 +357,37 @@ def pmus_miqp_dual(
 
 
 if __name__ == "__main__":
+    import argparse
     from pathlib import Path
     import matplotlib.pyplot as plt
-    from utils import load_recording, retrieve_parity_marks, extract_single_cycle
+    from utils import load_recording, get_ins_exp_marks, extract_single_cycle
 
-    CYCLE_IDX = 345
-    CYCLE_IDX = 2420 # reverse trigger / early cycling?
-    CYCLE_IDX = 8098
-    #CYCLE_IDX = 13775 # late cycling
+    DEFAULT_PATH = Path(__file__).parent / "data" / "ASL_spont_01.npz"
     TAU_SOE = 50
     INITIAL_DELAY = 0
     PEEP = 5.0
     OFFSET = 30
 
-    data, fs = load_recording(Path(__file__).parent / "data" / "ASL_spont_01.npz")
-    ins_marks, exp_marks = retrieve_parity_marks(data["volume"].to_numpy() * 10)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "path", type=Path, nargs="?", default=DEFAULT_PATH,
+        help=f"npz file (default: {DEFAULT_PATH.name})",
+    )
+    parser.add_argument(
+        "--cycle", type=int, default=8098,
+        help="cycle index (default: 8098)",
+    )
+    args = parser.parse_args()
+
+    # interesting cycles in ASL_spont_01
+    # 345, 2420 -> RT, EC
+    # 8098 -> reference
+    # 13775 -> LC
+
+    CYCLE_IDX = args.cycle
+
+    data, fs = load_recording(args.path)
+    ins_marks, exp_marks = get_ins_exp_marks(args.path, data, fs)
     cycle = extract_single_cycle(
         df=data,
         ins_mark=int(ins_marks[CYCLE_IDX]),
@@ -407,7 +423,7 @@ if __name__ == "__main__":
     print(f"J (full)  = {cost_miqp:.4f} ({solver_time_miqp:.2f}s)")
 
     t = cycle.time - cycle.time[0]
-    fig, axes = plt.subplots(3, 1, sharex=True, figsize=(8, 8))
+    fig, axes = plt.subplots(3, 1, sharex=True, figsize=(8, 7))
 
     paw_est = pmus_miqp + R_hat * flow_ml_s + E_hat * cycle.volume
     axes[0].plot(t, cycle.pressure, "k", label="paw")
@@ -432,8 +448,9 @@ if __name__ == "__main__":
     axes[2].plot([], [], color="tab:red", label="binary switches (MIQP)")
     axes[2].legend(loc="lower right", fontsize=10)
 
+    fig.canvas.manager.set_window_title(f"{args.path.name}")
     fig.suptitle(
-        f"MIQP R = {R_hat*1000:.2f}, C = {1/E_hat:.2f}, J = {cost_miqp:.2f}"
+        f"cycle #{CYCLE_IDX}: MIQP R = {R_hat*1000:.2f}, C = {1/E_hat:.2f}, J = {cost_miqp:.2f}"
     )
     fig.tight_layout()
     plt.show()

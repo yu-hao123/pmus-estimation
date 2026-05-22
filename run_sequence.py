@@ -18,7 +18,6 @@ from utils import (
 
 DEFAULT_PATH = Path(__file__).parent / "data" / "ASL_spont_01.npz"
 
-
 def select_cycles(
     path: Path,
     data: pd.DataFrame,
@@ -95,7 +94,7 @@ def plot_segments(segments: list[dict], title: str) -> None:
     R_lse = cat("R_lse")
     C_lse = cat("C_lse")
 
-    fig, axes = plt.subplots(5, 1, sharex=True, figsize=(11, 10))
+    fig, axes = plt.subplots(5, 1, sharex=True, figsize=(10, 9))
     axes[0].plot(t, cat("pressure"), "k", label="paw")
     axes[0].plot(t, cat("paw_est"), "tab:orange", label="paw_est (MIQP)")
     axes[0].set_ylabel("paw [cmH2O]"); axes[0].grid(True)
