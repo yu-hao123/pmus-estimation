@@ -63,7 +63,10 @@ def define_constraints(
     model: gp.Model, insexp: np.ndarray,
     tau_soe: int, epsilon: float,
     initial_delay: bool = False,
+    prefix: str = "",
 ) -> tuple[gp.MVar, gp.MVar]:
+    # prefix is useful for distinct naming when building one model
+    # with multiple regions (dual)
     n = insexp.size
     ns = 3 if initial_delay else 2  # initial_delay adds a pre-inspiratory flat-zero region
 
@@ -74,27 +77,27 @@ def define_constraints(
     diffs = np.diff(insexp)
     k_soe = int(np.where(diffs <= -0.5)[0][0]) + 1
 
-    pmus = model.addMVar(n, lb=-20.0, ub=1.0, name="pmus")
-    tik = model.addMVar((n, ns), vtype=GRB.BINARY, name="tik")
+    pmus = model.addMVar(n, lb=-20.0, ub=1.0, name=f"{prefix}pmus")
+    tik = model.addMVar((n, ns), vtype=GRB.BINARY, name=f"{prefix}tik")
 
     # uniqueness: each switch occurs exactly once
     for s in range(ns):
-        model.addConstr(tik[:, s].sum() == 1, name=f"unique_s{s}")
+        model.addConstr(tik[:, s].sum() == 1, name=f"{prefix}unique_s{s}")
 
     # ordering: switch indices are non-decreasing
     weights = np.arange(n)
     for s in range(1, ns):
-        model.addConstr(weights @ tik[:, s - 1] <= weights @ tik[:, s], name=f"order_s{s}")
+        model.addConstr(weights @ tik[:, s - 1] <= weights @ tik[:, s], name=f"{prefix}order_s{s}")
 
     # exhalation: last switch must lie at or before k_soe + tau_soe
-    model.addConstr(weights @ tik[:, ns - 1] <= k_soe + tau_soe, name="exhalation")
+    model.addConstr(weights @ tik[:, ns - 1] <= k_soe + tau_soe, name=f"{prefix}exhalation")
 
     # cumulative sum aux binaries: c[i, s] = sum(tik[0:i+1, s])
-    c = model.addMVar((n, ns), vtype=GRB.BINARY, name="c")
+    c = model.addMVar((n, ns), vtype=GRB.BINARY, name=f"{prefix}c")
     for s in range(ns):
-        model.addConstr(c[0, s] == tik[0, s], name=f"c_init_s{s}")
+        model.addConstr(c[0, s] == tik[0, s], name=f"{prefix}c_init_s{s}")
         for i in range(1, n):
-            model.addConstr(c[i, s] - c[i - 1, s] == tik[i, s], name=f"c_step_{i}_s{s}")
+            model.addConstr(c[i, s] - c[i - 1, s] == tik[i, s], name=f"{prefix}c_step_{i}_s{s}")
 
     # flat-zero regions, only when initial_delay
     if initial_delay:
@@ -104,14 +107,14 @@ def define_constraints(
             model.addGenConstrIndicator(
                 c[i, 0].item(), 0,
                 pmus[i] == 0,
-                name=f"reg0_{i}"
+                name=f"{prefix}reg0_{i}"
             )
             # region 3 (exhalation delay, after switch 2): pmus == 0
             # c[i, 2] == 1 -> pmus[i] = 0
             model.addGenConstrIndicator(
                 c[i, 2].item(), 1,
                 pmus[i] == 0,
-                name=f"reg3_{i}"
+                name=f"{prefix}reg3_{i}"
             )
 
     # monotonicity regions: c[i, s] activates the shape rule on pmus
@@ -119,21 +122,21 @@ def define_constraints(
         if initial_delay:
             # region 1 (decreasing ramp, between switch 0 and 1)
             # need aux binary because activation is a difference of binaries
-            b_dec = model.addVar(vtype=GRB.BINARY, name=f"b_dec_{i}")
+            b_dec = model.addVar(vtype=GRB.BINARY, name=f"{prefix}b_dec_{i}")
             model.addConstr(b_dec == c[i, 0] - c[i, 1])
             model.addGenConstrIndicator(
                 b_dec, 1,
                 pmus[i + 1] + epsilon <= pmus[i],
-                name=f"reg1_{i}"
+                name=f"{prefix}reg1_{i}"
             )
 
             # region 2 (increasing recovery, between switch 1 and 2)
-            b_inc = model.addVar(vtype=GRB.BINARY, name=f"b_inc_{i}")
+            b_inc = model.addVar(vtype=GRB.BINARY, name=f"{prefix}b_inc_{i}")
             model.addConstr(b_inc == c[i, 1] - c[i, 2])
             model.addGenConstrIndicator(
                 b_inc, 1,
                 pmus[i] + epsilon <= pmus[i + 1],
-                name=f"reg2_{i}"
+                name=f"{prefix}reg2_{i}"
             )
         else:
             # region 1 (before switch 0): pmus decreasing
@@ -141,18 +144,18 @@ def define_constraints(
             model.addGenConstrIndicator(
                 c[i, 0].item(), 0,
                 pmus[i + 1] + epsilon <= pmus[i],
-                name=f"reg1_{i}"
+                name=f"{prefix}reg1_{i}"
             )
 
             # region 2 (between switches): pmus increasing
             # need an aux binary b_mid = c[i, 0] - c[i, 1] because the activation
             # condition is a difference of binaries, not a single Var.
-            b_mid = model.addVar(vtype=GRB.BINARY, name=f"b_mid_{i}")
+            b_mid = model.addVar(vtype=GRB.BINARY, name=f"{prefix}b_mid_{i}")
             model.addConstr(b_mid == c[i, 0] - c[i, 1])
             model.addGenConstrIndicator(
                 b_mid, 1,
                 pmus[i] + epsilon <= pmus[i + 1],
-                name=f"reg2_{i}"
+                name=f"{prefix}reg2_{i}"
             )
 
             # region 3 (after switch 1): pmus constant
@@ -160,7 +163,7 @@ def define_constraints(
             model.addGenConstrIndicator(
                 c[i, 1].item(), 1,
                 pmus[i] == pmus[i + 1],
-                name=f"reg3_{i}"
+                name=f"{prefix}reg3_{i}"
             )
 
     return pmus, tik
@@ -274,6 +277,80 @@ def pmus_miqp_full(
     model.dispose()
     env.dispose()
     return pmus_hat, switching_times, R_hat, E_hat, solver_time
+
+
+# joint solve over two cycles sharing one (R, E). each cycle keeps its
+# own pmus segment, switching times, and (optionally) initial-delay padding.
+def pmus_miqp_dual(
+    cycle_first: Cycle, cycle_second: Cycle,
+    tau_soe: int = 50, epsilon: float = 1e-3,
+    l2_reg: bool = True,
+    initial_delay_length: int = 0,
+    threads: int = 0,
+    verbose: bool = False,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, float, float, float]:
+
+    if initial_delay_length > 0:
+        # pad every field so callers can keep using cycle attribute access below;
+        # the unused fields (time, pmus, pmus_mag) take zeros — MIQP never reads them
+        zeros = np.zeros(initial_delay_length)
+        def padded(cycle: Cycle) -> Cycle:
+            return Cycle(
+                time=np.concatenate([zeros, cycle.time]),
+                pressure=np.concatenate([zeros, cycle.pressure]),
+                flow=np.concatenate([zeros, cycle.flow]),
+                volume=np.concatenate([zeros, cycle.volume]),
+                pmus=np.concatenate([zeros, cycle.pmus]),
+                pmus_mag=np.concatenate([zeros, cycle.pmus_mag]),
+                insexp=np.concatenate([zeros, cycle.insexp]),
+            )
+        cycle_first = padded(cycle_first)
+        cycle_second = padded(cycle_second)
+
+    env = gp.Env(empty=True)
+    env.setParam("OutputFlag", 1 if verbose else 0)
+    env.start()
+    model = gp.Model(env=env)
+    model.Params.TimeLimit = 60.0
+    model.Params.Threads = threads
+
+    pmus_first, tik_first = define_constraints(
+        model, cycle_first.insexp, tau_soe, epsilon,
+        initial_delay=(initial_delay_length > 0),
+        prefix="first_",
+    )
+    pmus_second, tik_second = define_constraints(
+        model, cycle_second.insexp, tau_soe, epsilon,
+        initial_delay=(initial_delay_length > 0),
+        prefix="second_",
+    )
+
+    # shared mechanics across both cycles
+    RE = model.addMVar(2, lb=[0.0, 0.005], ub=[0.1, 1.0], name="RE")
+
+    A_first = np.column_stack([cycle_first.flow * 1000.0 / 60.0, cycle_first.volume])
+    A_second = np.column_stack([cycle_second.flow * 1000.0 / 60.0, cycle_second.volume])
+    residual_first = cycle_first.pressure - pmus_first - A_first @ RE
+    residual_second = cycle_second.pressure - pmus_second - A_second @ RE
+    cost = residual_first @ residual_first + residual_second @ residual_second
+    if l2_reg:
+        cost = cost + 1e-3 * (pmus_first @ pmus_first + pmus_second @ pmus_second)
+    model.setObjective(cost, GRB.MINIMIZE)
+    model.optimize()
+
+    pmus_hat_first = np.asarray(pmus_first.X).ravel()
+    pmus_hat_second = np.asarray(pmus_second.X).ravel()
+    switching_times_first = (np.arange(pmus_hat_first.size) @ tik_first.X).astype(int)
+    switching_times_second = (np.arange(pmus_hat_second.size) @ tik_second.X).astype(int)
+    R_hat, E_hat = float(RE.X[0]), float(RE.X[1])
+    solver_time = model.Runtime
+    model.dispose()
+    env.dispose()
+    return (
+        pmus_hat_first, pmus_hat_second,
+        switching_times_first, switching_times_second,
+        R_hat, E_hat, solver_time,
+    )
 
 
 if __name__ == "__main__":
