@@ -16,19 +16,17 @@ from utils import (
     retrieve_parity_marks,
 )
 
-
 DATA_PATH = Path(__file__).parent / "data" / "ASL_spont_01.npz"
-CYCLE_IDX = 8098     # 0-based; same physical cycle as MATLAB's 8099
+CYCLE_IDX = 345
 PEEP = 5.0
 OFFSET = 30
-
 
 def evaluate(cycle: Cycle, R_ext: float, C_ext: float) -> float:
     R = R_ext / 1000.0
     E = 1.0 / C_ext
     try:
         # threads=1: one core per solve, joblib drives the outer parallelism
-        pmus_hat, _, _ = pmus_miqp_fixed(cycle, R, E, l2_reg=True, threads=1)
+        pmus_hat, _, _ = pmus_miqp_fixed(cycle, R, E, l2_reg=True, threads=1, tau_soe=100)
         flow_ml_s = cycle.flow * 1000.0 / 60.0
         residual = (
             cycle.pressure - pmus_hat
@@ -71,7 +69,6 @@ def run_grid(
         for R in R_values
     )
     print(f"grid search done in {time.perf_counter() - t0:.1f} s")
-
     return np.array(costs).reshape(nC, nR)
 
 
@@ -146,7 +143,8 @@ def main():
     best_cost = float(cost_matrix[best_C_idx, best_R_idx])
     print(f"best grid: R = {best_R:.2f}, C = {best_C:.2f}, cost = {best_cost:.4f}")
 
-    out_path = Path(__file__).parent / f"heatmap_miqp_{args.dim}x{args.dim}.npz"
+    filename = f"heatmap_miqp_{args.dim}x{args.dim}_idx_{CYCLE_IDX}.npz"
+    out_path = Path(__file__).parent / filename
     np.savez(
         out_path,
         cost_matrix=cost_matrix,

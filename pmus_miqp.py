@@ -225,7 +225,8 @@ def pmus_miqp_fixed(
 
 def pmus_miqp_full(
     cycle: Cycle,
-    tau_soe: int = 50, epsilon: float = 1e-3,
+    tau_soe: int = 50,
+    epsilon: float = 1e-3,
     l2_reg: bool = True,
     initial_delay_length: int = 0,
     verbose: bool = False,
@@ -276,23 +277,22 @@ def pmus_miqp_full(
     solver_time = model.Runtime
     model.dispose()
     env.dispose()
-    return pmus_hat, switching_times, R_hat, E_hat, solver_time
+    return pmus_hat, R_hat, E_hat, switching_times, solver_time
 
 
-# joint solve over two cycles sharing one (R, E). each cycle keeps its
-# own pmus segment, switching times, and (optionally) initial-delay padding.
+# joint solve over two cycles sharing one (R, E)
 def pmus_miqp_dual(
-    cycle_first: Cycle, cycle_second: Cycle,
-    tau_soe: int = 50, epsilon: float = 1e-3,
+    cycle_first: Cycle,
+    cycle_second: Cycle,
+    tau_soe: int = 50,
+    epsilon: float = 1e-3,
     l2_reg: bool = True,
     initial_delay_length: int = 0,
     threads: int = 0,
     verbose: bool = False,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, float, float, float]:
+) -> tuple[np.ndarray, np.ndarray, float, float, np.ndarray, np.ndarray, float]:
 
     if initial_delay_length > 0:
-        # pad every field so callers can keep using cycle attribute access below;
-        # the unused fields (time, pmus, pmus_mag) take zeros — MIQP never reads them
         zeros = np.zeros(initial_delay_length)
         def padded(cycle: Cycle) -> Cycle:
             return Cycle(
@@ -347,9 +347,12 @@ def pmus_miqp_dual(
     model.dispose()
     env.dispose()
     return (
-        pmus_hat_first, pmus_hat_second,
-        switching_times_first, switching_times_second,
-        R_hat, E_hat, solver_time,
+        pmus_hat_first,
+        pmus_hat_second,
+        R_hat, E_hat,
+        switching_times_first,
+        switching_times_second,
+        solver_time,
     )
 
 
@@ -389,15 +392,15 @@ if __name__ == "__main__":
     )
 
     delay = 0
-    pmus_miqp, switches, R_hat, E_hat, solver_time_miqp = pmus_miqp_full(cycle, initial_delay_length=delay, tau_soe=TAU_SOE)
+    pmus_miqp, R_hat, E_hat, switches, solver_time_miqp = pmus_miqp_full(cycle, initial_delay_length=delay, tau_soe=TAU_SOE)
     pmus_miqp = pmus_miqp[delay:]
     switches = switches - delay
     cost_miqp = np.linalg.norm(
         cycle.pressure - pmus_miqp - R_hat * flow_ml_s - E_hat * cycle.volume
     )
     print(f"MIQP: R = {R_hat * 1000:.2f}, C = {1 / E_hat:.2f}")
-    print(f"||paw - paw_hat|| (fixed) = {cost_fixed:.4f} ({solver_time_fixed:.2f}s)")
-    print(f"||paw - paw_hat|| = {cost_miqp:.4f} ({solver_time_miqp:.2f}s)")
+    print(f"J (fixed) = {cost_fixed:.4f} ({solver_time_fixed:.2f}s)")
+    print(f"J (full)  = {cost_miqp:.4f} ({solver_time_miqp:.2f}s)")
 
     t = cycle.time - cycle.time[0]
     fig, axes = plt.subplots(3, 1, sharex=True, figsize=(8, 8))
