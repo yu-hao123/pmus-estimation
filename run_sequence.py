@@ -141,7 +141,7 @@ def main():
     segments = []
     for k in cycle_indices:
         cycle = extract_single_cycle(
-            df=data, fs=fs,
+            df=data,
             ins_mark=int(ins_marks[k]),
             next_ins_mark=int(ins_marks[k + 1]),
             exp_mark=int(exp_marks[k]),

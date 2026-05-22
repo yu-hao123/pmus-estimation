@@ -41,7 +41,7 @@ def load_cycle() -> Cycle:
     data, fs = load_recording(DATA_PATH)
     ins_marks, exp_marks = retrieve_parity_marks(data["volume"].to_numpy() * 10)
     return extract_single_cycle(
-        df=data, fs=fs,
+        df=data,
         ins_mark=int(ins_marks[CYCLE_IDX]),
         next_ins_mark=int(ins_marks[CYCLE_IDX + 1]),
         exp_mark=int(exp_marks[CYCLE_IDX]),

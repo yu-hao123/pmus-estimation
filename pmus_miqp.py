@@ -363,18 +363,21 @@ if __name__ == "__main__":
 
     CYCLE_IDX = 345
     CYCLE_IDX = 2420 # reverse trigger / early cycling?
-    #CYCLE_IDX = 8099
+    CYCLE_IDX = 8098
     #CYCLE_IDX = 13775 # late cycling
     TAU_SOE = 50
+    INITIAL_DELAY = 0
+    PEEP = 5.0
+    OFFSET = 30
 
     data, fs = load_recording(Path(__file__).parent / "data" / "ASL_spont_01.npz")
     ins_marks, exp_marks = retrieve_parity_marks(data["volume"].to_numpy() * 10)
     cycle = extract_single_cycle(
-        df=data, fs=fs,
+        df=data,
         ins_mark=int(ins_marks[CYCLE_IDX]),
         next_ins_mark=int(ins_marks[CYCLE_IDX+1]),
         exp_mark=int(exp_marks[CYCLE_IDX]),
-        peep=5.0, offset=50,
+        peep=PEEP
     )
 
     print(f"n = {cycle.pressure.size}")
@@ -391,10 +394,11 @@ if __name__ == "__main__":
         cycle.pressure - pmus_fixed - R_lse * flow_ml_s - E_lse * cycle.volume
     )
 
-    delay = 0
-    pmus_miqp, R_hat, E_hat, switches, solver_time_miqp = pmus_miqp_full(cycle, initial_delay_length=delay, tau_soe=TAU_SOE)
-    pmus_miqp = pmus_miqp[delay:]
-    switches = switches - delay
+    pmus_miqp, R_hat, E_hat, switches, solver_time_miqp = pmus_miqp_full(
+        cycle, initial_delay_length=INITIAL_DELAY, tau_soe=TAU_SOE
+    )
+    pmus_miqp = pmus_miqp[INITIAL_DELAY:]
+    switches = switches - INITIAL_DELAY
     cost_miqp = np.linalg.norm(
         cycle.pressure - pmus_miqp - R_hat * flow_ml_s - E_hat * cycle.volume
     )

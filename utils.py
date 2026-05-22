@@ -77,13 +77,14 @@ def fir_filter(order: int, cutoff: float, fs: float, x: np.ndarray) -> np.ndarra
 # important! removes peep from pressure
 def extract_single_cycle(
     df: pd.DataFrame,
-    fs: float,
     ins_mark: int,
     next_ins_mark: int,
     exp_mark: int,
     peep: float,
     offset: int = 30,
 ) -> Cycle:
+    # fs derived from the uniform time array
+    fs = 1.0 / (df["time"].iloc[1] - df["time"].iloc[0])
     start = ins_mark - offset
     stop = next_ins_mark - offset
     sliced = df.iloc[start:stop]
