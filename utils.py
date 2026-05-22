@@ -42,6 +42,33 @@ def retrieve_parity_marks(volume_x10: np.ndarray) -> tuple[np.ndarray, np.ndarra
     return np.asarray(ins_marks, dtype=np.int64), np.asarray(exp_marks, dtype=np.int64)
 
 
+def retrieve_flow_marks(
+    flow: np.ndarray,
+    fs: float,
+    flow_threshold: float = 10.0,
+    smoothing_cutoff: float = 2.0,
+) -> tuple[np.ndarray, np.ndarray]:
+    departure_threshold = flow_threshold * 0.5
+    filtered = fir_filter(8, smoothing_cutoff, fs, flow)
+    ins_marks: list[int] = []
+    exp_marks: list[int] = []
+    state = 0  # +1 after entering inspiration, -1 after entering expiration
+    for i in range(1, filtered.size):
+        if state != 1 and filtered[i] >= flow_threshold:
+            j = i
+            while j > 0 and filtered[j - 1] > departure_threshold:
+                j -= 1
+            ins_marks.append(j)
+            state = 1
+        elif state != -1 and filtered[i] <= -flow_threshold:
+            j = i
+            while j > 0 and filtered[j - 1] < -departure_threshold:
+                j -= 1
+            exp_marks.append(j)
+            state = -1
+    return np.asarray(ins_marks, dtype=np.int64), np.asarray(exp_marks, dtype=np.int64)
+
+
 def fir_filter(order: int, cutoff: float, fs: float, x: np.ndarray) -> np.ndarray:
     wn = cutoff / (fs / 2.0)
     taps = firwin(order + 1, wn, window="hann")

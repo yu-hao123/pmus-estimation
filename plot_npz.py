@@ -6,7 +6,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-from utils import load_recording, retrieve_parity_marks
+from utils import load_recording, retrieve_flow_marks, retrieve_parity_marks
 
 DEFAULT_PATH = Path(__file__).parent / "data" / "ASL_spont_01.npz"
 
@@ -24,21 +24,39 @@ def main():
         default="2600000:2650000",
         help="sample range start:stop"
     )
+    p.add_argument(
+        "--detector",
+        choices=["parity", "flow"],
+        default="parity",
+        help="mark detector type",
+    )
+    p.add_argument(
+        "--flow-threshold",
+        type=float,
+        default=5.0,
+        help="hysteresis threshold for detector flow (signal units, default 5)",
+    )
     args = p.parse_args()
 
     data, fs = load_recording(args.path)
-    print(f"loaded {args.path.name}; columns: {list(data.columns)}")
+    print(
+        f"\nloaded {args.path.name};\n"
+        f"columns: {list(data.columns)}\n"
+        f"dataset size: {data.size} \n"
+        )
 
     channels = ["pressure", "flow", "pmus"]
 
     parts = args.slice.split(":")
     start = int(parts[0])
     stop = int(parts[1])
-    print(f"plotting samples [{start}:{stop}]")
 
-    # compute parity marks on the full recording
-    # then add offset to the slice for plotting.
-    ins_marks, exp_marks = retrieve_parity_marks(data["volume"].to_numpy() * 10)
+    if args.detector == "parity":
+        ins_marks, exp_marks = retrieve_parity_marks(data["volume"].to_numpy() * 10)
+    else:
+        ins_marks, exp_marks = retrieve_flow_marks(
+            data["flow"].to_numpy(), fs, flow_threshold=args.flow_threshold
+        )
     is_ins_inside = (ins_marks >= start) & (ins_marks < stop)
     is_exp_inside = (exp_marks >= start) & (exp_marks < stop)
     ins_cycle_indices = np.flatnonzero(is_ins_inside)
@@ -67,8 +85,8 @@ def main():
         ax.plot(t_exp, y[exp_marks_rebased], "v", color="tab:red", markersize=6)
         ax.set_ylabel(name)
         ax.grid(True)
-    axes[-1].plot(t, data_slice["pmus_mag"].to_numpy(), color="tab:blue", label="pmus_mag")
-    axes[-1].legend(loc="upper right", fontsize=10)
+    #axes[-1].plot(t, data_slice["pmus_mag"].to_numpy(), color="tab:blue", label="pmus_mag")
+    #axes[-1].legend(loc="upper right", fontsize=10)
     axes[0].plot([], [], "^", color="tab:green", label="ins")
     axes[0].plot([], [], "v", color="tab:red", label="exp")
     axes[0].legend(loc="upper right", fontsize=10)
