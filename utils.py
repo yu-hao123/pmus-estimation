@@ -103,12 +103,16 @@ def extract_single_cycle(
     insexp = np.ones(pressure.size)
     insexp[exp_start:] = 0
 
+    pmus_mag = (
+        sliced["pmus_mag"].to_numpy() if "pmus_mag" in sliced.columns
+        else np.full(pressure.size, np.nan)
+    )
     return Cycle(
         time=sliced["time"].to_numpy(),
         pressure=pressure,
         flow=flow,
         volume=volume,
         pmus=sliced["pmus"].to_numpy(),
-        pmus_mag=sliced["pmus_mag"].to_numpy(),
+        pmus_mag=pmus_mag,
         insexp=insexp,
     )
