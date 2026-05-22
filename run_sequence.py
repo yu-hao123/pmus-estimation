@@ -12,21 +12,11 @@ from pmus_miqp import pmus_miqp_full
 from utils import (
     Cycle,
     extract_single_cycle,
+    get_ins_exp_marks,
     load_recording,
-    retrieve_flow_marks,
-    retrieve_parity_marks,
 )
 
 DEFAULT_PATH = Path(__file__).parent / "data" / "ASL_spont_01.npz"
-
-
-# parity marks trick only works on ASL_spont_* recordings
-def get_marks(
-    path: Path, data: pd.DataFrame, fs: float,
-) -> tuple[np.ndarray, np.ndarray]:
-    if path.name.startswith("ASL_spont_"):
-        return retrieve_parity_marks(data["volume"].to_numpy() * 10)
-    return retrieve_flow_marks(data["flow"].to_numpy(), fs)
 
 
 def select_cycles(
@@ -37,7 +27,7 @@ def select_cycles(
     cycles_arg: str | None,
     offset: int,
 ) -> tuple[np.ndarray, np.ndarray, list[int]]:
-    ins_marks, exp_marks = get_marks(path, data, fs)
+    ins_marks, exp_marks = get_ins_exp_marks(path, data, fs)
     n_cycles = min(len(ins_marks) - 1, len(exp_marks))
 
     if cycles_arg is not None:

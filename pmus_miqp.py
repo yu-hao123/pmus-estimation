@@ -421,7 +421,7 @@ if __name__ == "__main__":
     axes[2].plot(t, cycle.pmus, "k", label="pmus_true")
     axes[2].plot(t, cycle.pmus_mag, "tab:purple", label="pmus_mag_AI")
     axes[2].plot(t, pmus_qp, "tab:green", label="pmus_qp (QP solver)")
-    axes[2].plot(t, pmus_fixed, "k", label="pmus_miqp_fixed")
+    #axes[2].plot(t, pmus_fixed, "tab:cyan", label="pmus_miqp_fixed")
     axes[2].plot(t, pmus_miqp, "tab:orange", label="pmus_miqp")
     axes[2].set_ylabel("pmus [cmH2O]"); axes[2].grid(True)
     axes[2].set_xlabel("time [s]")

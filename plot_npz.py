@@ -6,7 +6,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-from utils import load_recording, retrieve_flow_marks, retrieve_parity_marks
+from utils import get_ins_exp_marks, load_recording
 
 DEFAULT_PATH = Path(__file__).parent / "data" / "ASL_spont_01.npz"
 
@@ -19,22 +19,16 @@ def main():
         default=DEFAULT_PATH,
         help=f"npz file to plot (default: {DEFAULT_PATH.name})"
     )
-    p.add_argument(
+    selector = p.add_mutually_exclusive_group()
+    selector.add_argument(
         "--slice",
-        default="2600000:2650000",
-        help="sample range start:stop"
+        default=None,
+        help="sample range start:stop",
     )
-    p.add_argument(
-        "--detector",
-        choices=["parity", "flow"],
-        default="parity",
-        help="mark detector type",
-    )
-    p.add_argument(
-        "--flow-threshold",
-        type=float,
-        default=5.0,
-        help="hysteresis threshold for detector flow (signal units, default 5)",
+    selector.add_argument(
+        "--cycles",
+        default=None,
+        help="ins-mark index range start:stop, e.g. 345:350",
     )
     args = p.parse_args()
 
@@ -47,16 +41,16 @@ def main():
 
     channels = ["pressure", "flow", "pmus"]
 
-    parts = args.slice.split(":")
-    start = int(parts[0])
-    stop = int(parts[1])
+    ins_marks, exp_marks = get_ins_exp_marks(args.path, data, fs)
 
-    if args.detector == "parity":
-        ins_marks, exp_marks = retrieve_parity_marks(data["volume"].to_numpy() * 10)
+    if args.cycles is not None:
+        k_start, k_stop = (int(v) for v in args.cycles.split(":"))
+        start = int(ins_marks[k_start] - 10)
+        stop = int(ins_marks[k_stop]) if k_stop < ins_marks.size else len(data)
     else:
-        ins_marks, exp_marks = retrieve_flow_marks(
-            data["flow"].to_numpy(), fs, flow_threshold=args.flow_threshold
-        )
+        slice_arg = args.slice if args.slice is not None else "2600000:2650000"
+        start, stop = (int(v) for v in slice_arg.split(":"))
+
     is_ins_inside = (ins_marks >= start) & (ins_marks < stop)
     is_exp_inside = (exp_marks >= start) & (exp_marks < stop)
     ins_cycle_indices = np.flatnonzero(is_ins_inside)

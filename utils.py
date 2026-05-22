@@ -69,6 +69,15 @@ def retrieve_flow_marks(
     return np.asarray(ins_marks, dtype=np.int64), np.asarray(exp_marks, dtype=np.int64)
 
 
+# parity marks trick only works on ASL_spont_* recordings
+def get_ins_exp_marks(
+    path: Path, data: pd.DataFrame, fs: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    if path.name.startswith("ASL_spont_"):
+        return retrieve_parity_marks(data["volume"].to_numpy() * 10)
+    return retrieve_flow_marks(data["flow"].to_numpy(), fs)
+
+
 def fir_filter(order: int, cutoff: float, fs: float, x: np.ndarray) -> np.ndarray:
     wn = cutoff / (fs / 2.0)
     taps = firwin(order + 1, wn, window="hann")
