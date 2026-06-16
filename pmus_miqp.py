@@ -210,7 +210,7 @@ def pmus_miqp_fixed(
     residual = pressure - pmus - R * flow_ml_s - E * volume
     cost = residual @ residual
     if l2_reg:
-        cost = cost + 1e-3 * (pmus @ pmus)
+        cost = cost + 1e-6 * (pmus @ pmus)
     model.setObjective(cost, GRB.MINIMIZE)
     #model.write("debug_miqp.lp")
     model.optimize()
@@ -267,7 +267,7 @@ def pmus_miqp_full(
     residual = pressure - pmus - A @ RE
     cost = residual @ residual
     if l2_reg:
-        cost = cost + 1e-3 * (pmus @ pmus)
+        cost = cost + 1e-6 * (pmus @ pmus)
     model.setObjective(cost, GRB.MINIMIZE)
     model.optimize()
 
