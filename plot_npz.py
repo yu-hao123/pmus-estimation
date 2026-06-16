@@ -45,7 +45,7 @@ def main():
 
     if args.cycles is not None:
         k_start, k_stop = (int(v) for v in args.cycles.split(":"))
-        start = int(ins_marks[k_start] - 10)
+        start = int(ins_marks[k_start] - 50)
         stop = int(ins_marks[k_stop]) if k_stop < ins_marks.size else len(data)
     else:
         slice_arg = args.slice if args.slice is not None else "2600000:2650000"

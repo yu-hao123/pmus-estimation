@@ -12,12 +12,12 @@ from pmus_miqp import pmus_miqp_fixed
 from utils import (
     Cycle,
     extract_single_cycle,
+    get_ins_exp_marks,
     load_recording,
-    retrieve_parity_marks,
 )
 
-DATA_PATH = Path(__file__).parent / "data" / "ASL_spont_01.npz"
-CYCLE_IDX = 345
+DEFAULT_PATH = Path(__file__).parent / "data" / "ASL_spont_01.npz"
+DEFAULT_CYCLE = 345
 PEEP = 5.0
 OFFSET = 30
 
@@ -26,7 +26,9 @@ def evaluate(cycle: Cycle, R_ext: float, C_ext: float) -> float:
     E = 1.0 / C_ext
     try:
         # threads=1: one core per solve, joblib drives the outer parallelism
-        pmus_hat, _, _ = pmus_miqp_fixed(cycle, R, E, l2_reg=True, threads=1, tau_soe=100)
+        pmus_hat, _, _ = pmus_miqp_fixed(
+            cycle, R, E, l2_reg=True, threads=1, tau_soe=25,
+        )
         flow_ml_s = cycle.flow * 1000.0 / 60.0
         residual = (
             cycle.pressure - pmus_hat
@@ -37,14 +39,14 @@ def evaluate(cycle: Cycle, R_ext: float, C_ext: float) -> float:
         return float("nan")
 
 
-def load_cycle() -> Cycle:
-    data, fs = load_recording(DATA_PATH)
-    ins_marks, exp_marks = retrieve_parity_marks(data["volume"].to_numpy() * 10)
+def load_cycle(path: Path, cycle_idx: int) -> Cycle:
+    data, fs = load_recording(path)
+    ins_marks, exp_marks = get_ins_exp_marks(path, data, fs)
     return extract_single_cycle(
         df=data,
-        ins_mark=int(ins_marks[CYCLE_IDX]),
-        next_ins_mark=int(ins_marks[CYCLE_IDX + 1]),
-        exp_mark=int(exp_marks[CYCLE_IDX]),
+        ins_mark=int(ins_marks[cycle_idx]),
+        next_ins_mark=int(ins_marks[cycle_idx + 1]),
+        exp_mark=int(exp_marks[cycle_idx]),
         peep=PEEP, offset=OFFSET,
     )
 
@@ -60,7 +62,7 @@ def run_grid(
     cycle: Cycle, R_values: np.ndarray, C_values: np.ndarray, jobs: int,
 ) -> np.ndarray:
     nR, nC = len(R_values), len(C_values)
-    print(f"grid: {nR} x {nC} = {nR * nC} solves, jobs={jobs}")
+    print(f"grid: {nR} x {nC} = {nR * nC} solves, jobs={jobs}, n={cycle.pressure.size}")
 
     t0 = time.perf_counter()
     costs = Parallel(n_jobs=jobs, verbose=10)(
@@ -102,6 +104,14 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
+        "path", type=Path, nargs="?", default=DEFAULT_PATH,
+        help=f"npz file (default: {DEFAULT_PATH.name})",
+    )
+    parser.add_argument(
+        "--cycle", type=int, default=DEFAULT_CYCLE,
+        help=f"cycle index (default: {DEFAULT_CYCLE})",
+    )
+    parser.add_argument(
         "--dim", type=int, default=20,
         help="(R, C) grid dim per axis"
     )
@@ -125,7 +135,7 @@ def main():
         plt.show()
         return
 
-    cycle = load_cycle()
+    cycle = load_cycle(args.path, args.cycle)
 
     R_true, C_true = lse_true(cycle)
     print(f"LSE-true: R = {R_true:.2f}, C = {C_true:.2f}")
@@ -143,7 +153,7 @@ def main():
     best_cost = float(cost_matrix[best_C_idx, best_R_idx])
     print(f"best grid: R = {best_R:.2f}, C = {best_C:.2f}, cost = {best_cost:.4f}")
 
-    filename = f"heatmap_miqp_{args.dim}x{args.dim}_idx_{CYCLE_IDX}.npz"
+    filename = f"heatmap_miqp_{args.dim}x{args.dim}_{args.path.stem}_idx_{args.cycle}.npz"
     out_path = Path(__file__).parent / filename
     np.savez(
         out_path,
@@ -152,7 +162,8 @@ def main():
         C_values=C_values,
         R_true=R_true, C_true=C_true,
         best_R=best_R, best_C=best_C, best_cost=best_cost,
-        cycle_idx=CYCLE_IDX, peep=PEEP, offset=OFFSET,
+        cycle_idx=args.cycle, peep=PEEP, offset=OFFSET,
+        cycle=np.array(cycle, dtype=object),
     )
     print(f"saved results to {out_path.name}")
 
