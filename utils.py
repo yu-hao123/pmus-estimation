@@ -73,6 +73,10 @@ def retrieve_flow_marks(
 def get_ins_exp_marks(
     path: Path, data: pd.DataFrame, fs: float,
 ) -> tuple[np.ndarray, np.ndarray]:
+    if "ins_flag" in data.columns and "exp_flag" in data.columns:
+        ins_marks = np.where(data["ins_flag"].to_numpy() != 0)[0].astype(np.int64)
+        exp_marks = np.where(data["exp_flag"].to_numpy() != 0)[0].astype(np.int64)
+        return ins_marks, exp_marks
     if path.name.startswith("ASL_spont_"):
         return retrieve_parity_marks(data["volume"].to_numpy() * 10)
     return retrieve_flow_marks(data["flow"].to_numpy(), fs)
@@ -101,6 +105,8 @@ def extract_single_cycle(
     flow = sliced["flow"].to_numpy()
     pressure = sliced["pressure"].to_numpy()
     volume = sliced["volume"].to_numpy()
+    pmus = sliced["pmus"].to_numpy()
+    pmus = pmus - pmus[0]
 
     flow = fir_filter(8, 0.2, fs, sliced["flow"].to_numpy())
     pressure = fir_filter(8, 0.2, fs, sliced["pressure"].to_numpy())
@@ -122,7 +128,7 @@ def extract_single_cycle(
         pressure=pressure,
         flow=flow,
         volume=volume,
-        pmus=sliced["pmus"].to_numpy(),
+        pmus=pmus,
         pmus_mag=pmus_mag,
         insexp=insexp,
     )
