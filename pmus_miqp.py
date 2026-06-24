@@ -361,6 +361,7 @@ if __name__ == "__main__":
     from pathlib import Path
     import matplotlib.pyplot as plt
     from utils import load_recording, get_ins_exp_marks, extract_single_cycle
+    from plotting import plot_cycle
 
     DEFAULT_PATH = Path(__file__).parent / "data" / "ASL_spont_01.npz"
     INITIAL_DELAY = 0
@@ -409,7 +410,7 @@ if __name__ == "__main__":
     print(f"LSE true (external): R = {R_lse * 1000:.2f}, C = {1 / (E_lse):.2f}")
 
     pmus_qp = pmus_qp_fixed(cycle, R_lse, E_lse)
-    pmus_fixed, _, solver_time_fixed = pmus_miqp_fixed(cycle, R_lse, E_lse)
+    pmus_fixed, _, solver_time_fixed = pmus_miqp_fixed(cycle, R_lse, E_lse, tau_soe=TAU_SOE)
     cost_fixed = np.linalg.norm(
         cycle.pressure - pmus_fixed - R_lse * flow_ml_s - E_lse * cycle.volume
     )
@@ -426,44 +427,15 @@ if __name__ == "__main__":
     print(f"J (fixed) = {cost_fixed:.4f} ({solver_time_fixed:.2f}s)")
     print(f"J (full)  = {cost_miqp:.4f} ({solver_time_miqp:.2f}s)")
 
-    t = cycle.time - cycle.time[0]
-    fig, axes = plt.subplots(3, 1, sharex=True, figsize=(8, 7))
-
-    paw_est = pmus_miqp + R_hat * flow_ml_s + E_hat * cycle.volume
-    axes[0].plot(t, cycle.pressure, "k", label="paw")
-    axes[0].plot(t, paw_est, "tab:orange", label="paw_est (MIQP)")
-    axes[0].set_ylabel("paw [cmH2O]"); axes[0].grid(True)
-    axes[0].legend(loc="upper right", fontsize=10)
-
-    axes[1].plot(t, cycle.flow, "k")
-    axes[1].set_ylabel("flow [L/min]"); axes[1].grid(True)
-
-    axes[2].plot(t, cycle.pmus, "k", label="pmus_true")
-    axes[2].plot(t, cycle.pmus_mag, "tab:purple", label="pmus_mag_AI")
-    axes[2].plot(t, pmus_qp, "tab:green", label="pmus_qp (QP solver)")
-    #axes[2].plot(t, pmus_fixed, "tab:cyan", label="pmus_miqp_fixed")
-    axes[2].plot(t, pmus_miqp, "tab:orange", label="pmus_miqp")
-    axes[2].set_ylabel("pmus [cmH2O]"); axes[2].grid(True)
-    axes[2].set_xlabel("time [s]")
-
-    ins_sample = OFFSET
-    exp_sample = int(np.where(np.diff(cycle.insexp) <= -0.5)[0][0]) + 1
-
-    channels = [cycle.pressure, cycle.flow, cycle.pmus]
-    for ax, y in zip(axes, channels):
-        ax.plot(t[ins_sample], y[ins_sample], "^", color="tab:green", markersize=8)
-        ax.plot(t[exp_sample], y[exp_sample], "v", color="tab:red", markersize=8)
-        for s in switches:
-            ax.axvline(t[s], color="tab:red", linestyle="--", linewidth=1.0)
-    axes[1].plot([], [], "^", color="tab:green", label="ins mark")
-    axes[1].plot([], [], "v", color="tab:red", label="exp mark")
-    axes[1].legend(loc="lower right", fontsize=10)
-    axes[2].plot([], [], color="tab:red", label="binary switches (MIQP)")
-    axes[2].legend(loc="lower right", fontsize=10)
-
-    fig.canvas.manager.set_window_title(f"{args.path.name}")
-    fig.suptitle(
-        f"cycle #{CYCLE_IDX}: R = {R_hat*1000:.2f}, C = {1/E_hat:.2f}, J = {cost_miqp:.2f}"
+    fig, axes = plot_cycle(
+        cycle,
+        estimates={"pmus_MIQP": (pmus_miqp, R_hat, E_hat)},
+        switches=switches,
+        title=f"cycle #{CYCLE_IDX}: R = {R_hat*1000:.2f}, C = {1/E_hat:.2f}, J = {cost_miqp:.2f}",
     )
-    fig.tight_layout()
+    time = cycle.time - cycle.time[0]
+    axes[2].plot(time, cycle.pmus_mag, label="pmus_mag_AI")
+    axes[2].plot(time, pmus_qp, label="pmus_LSE")
+    axes[2].legend(loc="lower right", fontsize=9)
+    fig.canvas.manager.set_window_title(f"{args.path.name}")
     plt.show()
