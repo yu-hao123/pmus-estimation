@@ -1,0 +1,7 @@
+__pycache__/**
+myenv/**
+legacy_data/**
+reference/**
+docs/**
+outputs/**
+tmp/**
