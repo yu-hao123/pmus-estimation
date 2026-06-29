@@ -9,6 +9,7 @@ import numpy as np
 from joblib import Parallel, delayed
 
 from pmus_miqp import pmus_miqp_fixed
+from plotting import plot_cycle
 from utils import (
     Cycle,
     extract_single_cycle,
@@ -98,6 +99,41 @@ def plot_surface(
     fig.tight_layout()
 
 
+def plot_best(cycle: Cycle, R_best: float, C_best: float) -> tuple[plt.Figure, np.ndarray]:
+    R_ml_best, E_best = R_best / 1000.0, 1.0 / C_best
+    pmus_best, _, _ = pmus_miqp_fixed(cycle, R_ml_best, E_best, l2_reg=True, tau_soe=50)
+
+    R_lse, C_lse = lse_true(cycle)
+    R_ml_lse, E_lse = R_lse / 1000.0, 1.0 / C_lse
+    pmus_lse, _, _ = pmus_miqp_fixed(cycle, R_ml_lse, E_lse, l2_reg=True, tau_soe=50)
+
+    fig, axes = plot_cycle(
+        cycle,
+        estimates={
+            "pmus_MIQP": (pmus_best, R_ml_best, E_best),
+            f"pmus_MIQP-LSE_(R={R_lse:.1f}, C={C_lse:.1f})": (pmus_lse, R_ml_lse, E_lse),
+        },
+    )
+
+    # paw reconstructed from the real pmus and LSE R, C parameters
+    # best paw_est achievable (independent of MIQP)
+    time = cycle.time - cycle.time[0]
+    flow_ml_s = cycle.flow * 1000.0 / 60.0
+    paw_est_lse_true = cycle.pmus + R_ml_lse * flow_ml_s + E_lse * cycle.volume
+    axes[0].plot(
+        time, paw_est_lse_true, "tab:purple", linestyle="--",
+        label="paw_est (pmus_true @ LSE (R, C))",
+    )
+    axes[0].legend(loc="upper right", fontsize=9)
+
+    # reference pmus_mag waveform on the pmus panel, if available
+    if not np.all(np.isnan(cycle.pmus_mag)):
+        axes[2].plot(time, cycle.pmus_mag, color="tab:green", label="pmus_mag_AI")
+        axes[2].legend(loc="lower right", fontsize=9)
+
+    return fig, axes
+
+
 def main():
     parser = argparse.ArgumentParser(
         description=__doc__,
@@ -123,6 +159,10 @@ def main():
         "--load", type=Path, default=None,
         help="path to a saved heatmap .npz; skips the grid search and just plots"
     )
+    parser.add_argument(
+        "--no-plot", dest="plot", action="store_false",
+        help="run the grid search and save results without showing any plots"
+    )
     args = parser.parse_args()
 
     if args.load is not None:
@@ -132,6 +172,16 @@ def main():
             float(npz["R_true"]), float(npz["C_true"]),
             float(npz["R_best"]), float(npz["C_best"]),
         )
+        if "cycle" in npz.files:
+            R_best, C_best = float(npz["R_best"]), float(npz["C_best"])
+            fig, _ = plot_best(npz["cycle"].item(), R_best, C_best)
+            fig.suptitle(
+                f"cycle #{int(npz['cycle_idx'])}: R = {R_best:.2f}, "
+                f"C = {C_best:.2f}, J = {float(npz['cost_best']):.2f}"
+            )
+            fig.tight_layout()
+        else:
+            print("no cycle stored in this dataset; skipping pmus best plot")
         plt.show()
         return
 
@@ -140,6 +190,12 @@ def main():
     R_true, C_true = lse_true(cycle)
     print(f"PEEP: {PEEP}")
     print(f"LSE-true: R = {R_true:.2f}, C = {C_true:.2f}")
+
+    # show the raw cycle to be analyzed before starting the grid search
+    if args.plot:
+        plot_cycle(cycle, title=f"cycle #{args.cycle} (to be analyzed)")
+        plt.show(block=False)
+        plt.pause(0.1)
 
     R_values = np.linspace( 5.0, 50.0, args.dim) # (cmH2O.s)/L
     C_values = np.linspace(10.0, 80.0, args.dim) # mL/cmH2O
@@ -168,8 +224,12 @@ def main():
     )
     print(f"saved results to {out_path.name}")
 
-    plot_surface(cost_matrix, R_values, C_values, R_true, C_true, R_best, C_best)
-    plt.show()
+    if args.plot:
+        plot_surface(cost_matrix, R_values, C_values, R_true, C_true, R_best, C_best)
+        fig, _ = plot_best(cycle, R_best, C_best)
+        fig.suptitle(f"cycle #{args.cycle}: R = {R_best:.2f}, C = {C_best:.2f}, J = {cost_best:.2f}")
+        fig.tight_layout()
+        plt.show()
 
 
 if __name__ == "__main__":
