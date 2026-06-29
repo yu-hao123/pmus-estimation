@@ -4,6 +4,8 @@ from gurobipy import GRB
 
 from utils import Cycle
 
+L2_REG_FACTOR = 1e-3
+
 # quadratic optimization demo (minimal gurobi setup)
 def pmus_qp_fixed(
     cycle: Cycle, R: float, E: float, verbose: bool = False
@@ -210,7 +212,7 @@ def pmus_miqp_fixed(
     residual = pressure - pmus - R * flow_ml_s - E * volume
     cost = residual @ residual
     if l2_reg:
-        cost = cost + 1e-6 * (pmus @ pmus)
+        cost = cost + L2_REG_FACTOR * (pmus @ pmus)
     model.setObjective(cost, GRB.MINIMIZE)
     #model.write("debug_miqp.lp")
     model.optimize()
@@ -267,7 +269,7 @@ def pmus_miqp_full(
     residual = pressure - pmus - A @ RE
     cost = residual @ residual
     if l2_reg:
-        cost = cost + 1e-6 * (pmus @ pmus)
+        cost = cost + L2_REG_FACTOR * (pmus @ pmus)
     model.setObjective(cost, GRB.MINIMIZE)
     model.optimize()
 
@@ -398,7 +400,8 @@ if __name__ == "__main__":
         ins_mark=int(ins_marks[CYCLE_IDX]),
         next_ins_mark=int(ins_marks[CYCLE_IDX+1]),
         exp_mark=int(exp_marks[CYCLE_IDX]),
-        peep=PEEP
+        peep=PEEP,
+        offset=OFFSET
     )
 
     print(f"n = {cycle.pressure.size}")
