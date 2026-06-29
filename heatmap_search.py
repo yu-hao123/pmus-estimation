@@ -21,18 +21,18 @@ DEFAULT_CYCLE = 345
 PEEP = 5.0
 OFFSET = 30
 
-def evaluate(cycle: Cycle, R_ext: float, C_ext: float) -> float:
-    R = R_ext / 1000.0
+def evaluate(cycle: Cycle, R: float, C_ext: float) -> float:
+    R_ml = R / 1000.0
     E = 1.0 / C_ext
     try:
         # threads=1: one core per solve, joblib drives the outer parallelism
         pmus_hat, _, _ = pmus_miqp_fixed(
-            cycle, R, E, l2_reg=True, threads=1, tau_soe=25,
+            cycle, R_ml, E, l2_reg=True, threads=1, tau_soe=50,
         )
         flow_ml_s = cycle.flow * 1000.0 / 60.0
         residual = (
             cycle.pressure - pmus_hat
-            - R * flow_ml_s - E * cycle.volume
+            - R_ml * flow_ml_s - E * cycle.volume
         )
         return float(np.linalg.norm(residual))
     except Exception:
@@ -78,7 +78,7 @@ def plot_surface(
     cost_matrix: np.ndarray,
     R_values: np.ndarray, C_values: np.ndarray,
     R_true: float, C_true: float,
-    best_R: float, best_C: float,
+    R_best: float, C_best: float,
 ) -> None:
     fig, ax = plt.subplots(figsize=(7, 5.5))
     extent = [R_values[0], R_values[-1], C_values[0], C_values[-1]]
@@ -91,7 +91,7 @@ def plot_surface(
     ax.set_ylabel(r"Compliance C [mL/cmH$_2$O]")
     ax.set_title("MIQP residual cost surface")
     ax.plot(R_true, C_true, "r*", markersize=10, mec="w", label="LSE true")
-    ax.plot(best_R, best_C, "go", markersize=8, mec="w", label="surface minimum")
+    ax.plot(R_best, C_best, "go", markersize=8, mec="w", label="surface minimum")
     ax.legend(loc="upper right")
     ax.format_coord = lambda x, y:    f"  (R, C) = ({x:.2f}, {y:.2f})"
     im.format_cursor_data = lambda v: f"  cost J = [{10**v:.3f}]         "
@@ -126,11 +126,11 @@ def main():
     args = parser.parse_args()
 
     if args.load is not None:
-        npz = np.load(args.load)
+        npz = np.load(args.load, allow_pickle=True)
         plot_surface(
             npz["cost_matrix"], npz["R_values"], npz["C_values"],
             float(npz["R_true"]), float(npz["C_true"]),
-            float(npz["best_R"]), float(npz["best_C"]),
+            float(npz["R_best"]), float(npz["C_best"]),
         )
         plt.show()
         return
@@ -138,6 +138,7 @@ def main():
     cycle = load_cycle(args.path, args.cycle)
 
     R_true, C_true = lse_true(cycle)
+    print(f"PEEP: {PEEP}")
     print(f"LSE-true: R = {R_true:.2f}, C = {C_true:.2f}")
 
     R_values = np.linspace( 5.0, 50.0, args.dim) # (cmH2O.s)/L
@@ -147,11 +148,11 @@ def main():
     if np.isnan(cost_matrix).all():
         raise RuntimeError("grid solves failed, no usable cost matrix")
 
-    best_C_idx, best_R_idx = np.unravel_index(np.nanargmin(cost_matrix), cost_matrix.shape)
-    best_R = float(R_values[best_R_idx])
-    best_C = float(C_values[best_C_idx])
-    best_cost = float(cost_matrix[best_C_idx, best_R_idx])
-    print(f"best grid: R = {best_R:.2f}, C = {best_C:.2f}, cost = {best_cost:.4f}")
+    C_best_idx, R_best_idx = np.unravel_index(np.nanargmin(cost_matrix), cost_matrix.shape)
+    R_best = float(R_values[R_best_idx])
+    C_best = float(C_values[C_best_idx])
+    cost_best = float(cost_matrix[C_best_idx, R_best_idx])
+    print(f"best grid: R = {R_best:.2f}, C = {C_best:.2f}, cost = {cost_best:.4f}")
 
     filename = f"heatmap_miqp_{args.dim}x{args.dim}_{args.path.stem}_idx_{args.cycle}.npz"
     out_path = Path(__file__).parent / filename
@@ -161,13 +162,13 @@ def main():
         R_values=R_values,
         C_values=C_values,
         R_true=R_true, C_true=C_true,
-        best_R=best_R, best_C=best_C, best_cost=best_cost,
+        R_best=R_best, C_best=C_best, cost_best=cost_best,
         cycle_idx=args.cycle, peep=PEEP, offset=OFFSET,
         cycle=np.array(cycle, dtype=object),
     )
     print(f"saved results to {out_path.name}")
 
-    plot_surface(cost_matrix, R_values, C_values, R_true, C_true, best_R, best_C)
+    plot_surface(cost_matrix, R_values, C_values, R_true, C_true, R_best, C_best)
     plt.show()
 
 
