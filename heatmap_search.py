@@ -205,8 +205,7 @@ def main():
     # show the raw cycle to be analyzed before starting the grid search
     if args.plot:
         plot_cycle(cycle, title=f"cycle #{args.cycle} (to be analyzed)")
-        plt.show(block=False)
-        plt.pause(0.1)
+        plt.show(block=True)
 
     R_values = np.linspace( 5.0, 50.0, args.dim) # (cmH2O.s)/L
     C_values = np.linspace(10.0, 80.0, args.dim) # mL/cmH2O
