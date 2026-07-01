@@ -20,15 +20,25 @@ from utils import (
 DEFAULT_PATH = Path(__file__).parent / "data" / "ASL_spont_01.npz"
 DEFAULT_CYCLE = 345
 PEEP = 5.0
-OFFSET = 30
+OFFSET_SECONDS = 0.3
+TAU_SECONDS = 0.5
+
+def time_to_samples(seconds: float, fs: float) -> int:
+    return round(seconds * fs)
+
+
+def cycle_fs(cycle: Cycle) -> float:
+    return 1.0 / (cycle.time[1] - cycle.time[0])
+
 
 def evaluate(cycle: Cycle, R: float, C_ext: float) -> float:
     R_ml = R / 1000.0
     E = 1.0 / C_ext
+    tau_soe = time_to_samples(TAU_SECONDS, cycle_fs(cycle))
     try:
         # threads=1: one core per solve, joblib drives the outer parallelism
         pmus_hat, _, _ = pmus_miqp_fixed(
-            cycle, R_ml, E, l2_reg=True, threads=1, tau_soe=50,
+            cycle, R_ml, E, l2_reg=True, threads=1, tau_soe=tau_soe,
         )
         flow_ml_s = cycle.flow * 1000.0 / 60.0
         residual = (
@@ -48,7 +58,7 @@ def load_cycle(path: Path, cycle_idx: int) -> Cycle:
         ins_mark=int(ins_marks[cycle_idx]),
         next_ins_mark=int(ins_marks[cycle_idx + 1]),
         exp_mark=int(exp_marks[cycle_idx]),
-        peep=PEEP, offset=OFFSET,
+        peep=PEEP, offset=time_to_samples(OFFSET_SECONDS, fs),
     )
 
 
@@ -100,12 +110,13 @@ def plot_surface(
 
 
 def plot_best(cycle: Cycle, R_best: float, C_best: float) -> tuple[plt.Figure, np.ndarray]:
+    tau_soe = time_to_samples(TAU_SECONDS, cycle_fs(cycle))
     R_ml_best, E_best = R_best / 1000.0, 1.0 / C_best
-    pmus_best, _, _ = pmus_miqp_fixed(cycle, R_ml_best, E_best, l2_reg=True, tau_soe=50)
+    pmus_best, _, _ = pmus_miqp_fixed(cycle, R_ml_best, E_best, l2_reg=True, tau_soe=tau_soe)
 
     R_lse, C_lse = lse_true(cycle)
     R_ml_lse, E_lse = R_lse / 1000.0, 1.0 / C_lse
-    pmus_lse, _, _ = pmus_miqp_fixed(cycle, R_ml_lse, E_lse, l2_reg=True, tau_soe=50)
+    pmus_lse, _, _ = pmus_miqp_fixed(cycle, R_ml_lse, E_lse, l2_reg=True, tau_soe=tau_soe)
 
     fig, axes = plot_cycle(
         cycle,
@@ -219,7 +230,7 @@ def main():
         C_values=C_values,
         R_true=R_true, C_true=C_true,
         R_best=R_best, C_best=C_best, cost_best=cost_best,
-        cycle_idx=args.cycle, peep=PEEP, offset=OFFSET,
+        cycle_idx=args.cycle, peep=PEEP, offset_seconds=OFFSET_SECONDS,
         cycle=np.array(cycle, dtype=object),
     )
     print(f"saved results to {out_path.name}")
