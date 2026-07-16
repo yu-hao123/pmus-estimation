@@ -74,6 +74,7 @@ def solve_cycle(cycle: Cycle, k: int, tau: int) -> dict:
         "paw_est":   paw_est,
         "flow":      cycle.flow,
         "pmus":      cycle.pmus,
+        "pmus_mag":  cycle.pmus_mag,
         "pmus_miqp": pmus_hat,
         "R":         np.full(n, R_display),
         "C":         np.full(n, C_display),
@@ -105,19 +106,20 @@ def plot_segments(segments: list[dict], title: str) -> None:
 
     axes[2].plot(t, cat("pmus"), "k", label="pmus_ASL")
     axes[2].plot(t, cat("pmus_miqp"), "tab:orange", label="pmus_miqp")
+    axes[2].plot(t, cat("pmus_mag"), "tab:green", label="pmus_mag")
     axes[2].set_ylabel("pmus [cmH2O]"); axes[2].grid(True)
     axes[2].legend(loc="upper right", fontsize=9)
 
     axes[3].plot(t, R, "tab:orange", label="R (MIQP)")
     axes[3].plot(t, R_lse, "r--", label="R_lse")
     axes[3].set_ylabel("R [cmH2O*s/L]"); axes[3].grid(True)
-    axes[3].set_ylim(6, 12)
+    axes[3].set_ylim(5, 40)
     axes[3].legend(loc="upper right", fontsize=9)
 
     axes[4].plot(t, C, "tab:orange", label="C (MIQP)")
     axes[4].plot(t, C_lse, "r--", label="C_lse")
     axes[4].set_ylabel("C [mL/cmH2O]"); axes[4].grid(True)
-    axes[4].set_ylim(25, 40)
+    axes[4].set_ylim(10, 70)
     axes[4].set_xlabel("time [s]")
     axes[4].legend(loc="upper right", fontsize=9)
 
@@ -154,20 +156,24 @@ def main():
         "--cycles", default=None,
         help="cycles index range, e.g. 9:11 picks cycles #9 and #10",
     )
+    # offset and tsoe in seconds
     parser.add_argument("--peep", type=float, default=5.0)
-    parser.add_argument("--offset", type=int, default=50)
-    parser.add_argument("--tau", type=int, default=50)
+    parser.add_argument("--offset", type=float, default=0.5)
+    parser.add_argument("--tsoe", type=float, default=0.5)
     args = parser.parse_args()
 
     if args.slice is None and args.cycles is None:
         args.slice = "2600000:2601500"  # ASL_spont default slice
 
     data, fs = load_recording(args.path)
-    print(f"loaded {args.path.name}; columns: {list(data.columns)}")
+    print(f"loaded {args.path.name}; columns: {list(data.columns)}, fs: {fs}Hz")
+
+    offset = int(args.offset * fs)
+    tau_soe = int(args.tsoe * fs)
 
     ins_marks, exp_marks, cycle_indices = select_cycles(
         args.path, data, fs,
-        args.slice, args.cycles, args.offset,
+        args.slice, args.cycles, offset,
     )
 
     t0 = time.perf_counter()
@@ -178,9 +184,9 @@ def main():
             ins_mark=int(ins_marks[k]),
             next_ins_mark=int(ins_marks[k + 1]),
             exp_mark=int(exp_marks[k]),
-            peep=args.peep, offset=args.offset,
+            peep=args.peep, offset=offset,
         )
-        segments.append(solve_cycle(cycle, k, args.tau))
+        segments.append(solve_cycle(cycle, k, tau_soe))
     print(f"all cycles done in {time.perf_counter() - t0:.1f} s")
 
     plot_segments(

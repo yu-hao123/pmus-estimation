@@ -368,7 +368,7 @@ if __name__ == "__main__":
     DEFAULT_PATH = Path(__file__).parent / "data" / "ASL_spont_01.npz"
     INITIAL_DELAY = 0
     PEEP = 5.0
-    OFFSET = 30
+    OFFSET_SECONDS = 0.3
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -401,7 +401,7 @@ if __name__ == "__main__":
         next_ins_mark=int(ins_marks[CYCLE_IDX+1]),
         exp_mark=int(exp_marks[CYCLE_IDX]),
         peep=PEEP,
-        offset=OFFSET
+        offset=int(OFFSET_SECONDS * fs)
     )
 
     print(f"n = {cycle.pressure.size}")
