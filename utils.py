@@ -117,6 +117,7 @@ def extract_single_cycle(
 
     exp_start = exp_mark - ins_mark + offset
     insexp = np.ones(pressure.size)
+    insexp[:offset] = 0  # ins mark is the 0 -> 1 edge at i = offset
     insexp[exp_start:] = 0
 
     pmus_mag = (
