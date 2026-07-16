@@ -60,10 +60,9 @@ def downsample_cycle(cycle: Cycle, factor: int) -> Cycle:
     )
 
 
-def evaluate(cycle: Cycle, R: float, C_ext: float) -> float:
+def evaluate(cycle: Cycle, R: float, C_ext: float, tau_soe: int) -> float:
     R_ml = R / 1000.0
     E = 1.0 / C_ext
-    tau_soe = time_to_samples(TSOE_SECONDS, cycle_fs(cycle))
     try:
         # threads=1: one core per solve, joblib drives the outer parallelism
         pmus_hat, _, _ = pmus_miqp_fixed(
@@ -102,14 +101,14 @@ def lse_true(cycle: Cycle) -> tuple[float, float]:
 
 
 def run_grid(
-    cycle: Cycle, R_values: np.ndarray, C_values: np.ndarray, jobs: int,
+    cycle: Cycle, R_values: np.ndarray, C_values: np.ndarray, jobs: int, tau_soe: int,
 ) -> np.ndarray:
     nR, nC = len(R_values), len(C_values)
     print(f"grid: {nR} x {nC} = {nR * nC} solves, jobs={jobs}, n={cycle.pressure.size}")
 
     t0 = time.perf_counter()
     costs = Parallel(n_jobs=jobs, verbose=10)(
-        delayed(evaluate)(cycle, float(R), float(C))
+        delayed(evaluate)(cycle, float(R), float(C), tau_soe)
         for C in C_values
         for R in R_values
     )
@@ -141,8 +140,7 @@ def plot_surface(
     fig.tight_layout()
 
 
-def plot_best(cycle: Cycle, R_best: float, C_best: float) -> tuple[plt.Figure, np.ndarray]:
-    tau_soe = time_to_samples(TSOE_SECONDS, cycle_fs(cycle))
+def plot_best(cycle: Cycle, R_best: float, C_best: float, tau_soe: int) -> tuple[plt.Figure, np.ndarray]:
     R_ml_best, E_best = R_best / 1000.0, 1.0 / C_best
     pmus_best, _, _ = pmus_miqp_fixed(cycle, R_ml_best, E_best, l2_reg=True, tau_soe=tau_soe)
 
@@ -207,6 +205,10 @@ def main():
         help=f"PEEP subtracted from pressure (default: {PEEP})"
     )
     parser.add_argument(
+        "--tsoe", type=float, default=TSOE_SECONDS,
+        help=f"exhalation switch window in seconds (default: {TSOE_SECONDS})"
+    )
+    parser.add_argument(
         "--load", type=Path, default=None,
         help="path to a saved heatmap .npz; skips the grid search and just plots"
     )
@@ -225,7 +227,10 @@ def main():
         )
         if "cycle" in npz.files:
             R_best, C_best = float(npz["R_best"]), float(npz["C_best"])
-            fig, _ = plot_best(npz["cycle"].item(), R_best, C_best)
+            cycle = npz["cycle"].item()
+            tsoe_seconds = float(npz["tsoe_seconds"]) if "tsoe_seconds" in npz.files else TSOE_SECONDS
+            tau_soe = time_to_samples(tsoe_seconds, cycle_fs(cycle))
+            fig, _ = plot_best(cycle, R_best, C_best, tau_soe)
             fig.suptitle(
                 f"cycle #{int(npz['cycle_idx'])}: R = {R_best:.2f}, "
                 f"C = {C_best:.2f}, J = {float(npz['cost_best']):.2f}"
@@ -238,9 +243,19 @@ def main():
 
     cycle = load_cycle(args.path, args.cycle, args.downsample, args.peep)
 
+    R_values = np.linspace( 5.0, 50.0, args.dim) # (cmH2O.s)/L
+    C_values = np.linspace(10.0, 80.0, args.dim) # mL/cmH2O
+
     R_true, C_true = lse_true(cycle)
+    fs = cycle_fs(cycle)
+    tau_soe = time_to_samples(args.tsoe, fs)
+    print(f"\nfile: {args.path.name}, cycle #{args.cycle}")
     print(f"PEEP: {args.peep}")
-    print(f"downsample: {args.downsample}x -> fs = {cycle_fs(cycle):.1f} Hz, n = {cycle.pressure.size}")
+    print(f"downsample: {args.downsample}x -> fs = {fs:.1f} Hz, n = {cycle.pressure.size}")
+    print(f"offset: {OFFSET_SECONDS} s ({time_to_samples(OFFSET_SECONDS, fs)} samples)")
+    print(f"tsoe: {args.tsoe} s ({tau_soe} samples)")
+    print(f"grid: R [{R_values[0]:.0f}, {R_values[-1]:.0f}], "
+          f"C [{C_values[0]:.0f}, {C_values[-1]:.0f}], dim = {args.dim} (jobs = {args.jobs})")
     print(f"LSE-true: R = {R_true:.2f}, C = {C_true:.2f}")
 
     # show the raw cycle to be analyzed before starting the grid search
@@ -248,9 +263,7 @@ def main():
         plot_cycle(cycle, title=f"cycle #{args.cycle} (to be analyzed)")
         plt.show(block=True)
 
-    R_values = np.linspace( 5.0, 50.0, args.dim) # (cmH2O.s)/L
-    C_values = np.linspace(10.0, 80.0, args.dim) # mL/cmH2O
-    cost_matrix = run_grid(cycle, R_values, C_values, args.jobs)
+    cost_matrix = run_grid(cycle, R_values, C_values, args.jobs, tau_soe)
 
     if np.isnan(cost_matrix).all():
         raise RuntimeError("grid solves failed, no usable cost matrix")
@@ -271,14 +284,14 @@ def main():
         R_true=R_true, C_true=C_true,
         R_best=R_best, C_best=C_best, cost_best=cost_best,
         cycle_idx=args.cycle, peep=args.peep,
-        offset_seconds=OFFSET_SECONDS, tsoe_seconds=TSOE_SECONDS,
+        offset_seconds=OFFSET_SECONDS, tsoe_seconds=args.tsoe,
         cycle=np.array(cycle, dtype=object),
     )
-    print(f"saved results to {out_path.name}")
+    print(f"saved results to {out_path.name}\n\n")
 
     if args.plot:
         plot_surface(cost_matrix, R_values, C_values, R_true, C_true, R_best, C_best)
-        fig, _ = plot_best(cycle, R_best, C_best)
+        fig, _ = plot_best(cycle, R_best, C_best, tau_soe)
         fig.suptitle(f"cycle #{args.cycle}: R = {R_best:.2f}, C = {C_best:.2f}, J = {cost_best:.2f}")
         fig.tight_layout()
         plt.show()
