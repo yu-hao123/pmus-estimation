@@ -7,6 +7,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 from joblib import Parallel, delayed
+from scipy.signal import decimate
 
 from pmus_miqp import pmus_miqp_fixed
 from plotting import plot_cycle
@@ -20,8 +21,8 @@ from utils import (
 DEFAULT_PATH = Path(__file__).parent / "data" / "ASL_spont_01.npz"
 DEFAULT_CYCLE = 345
 PEEP = 5.0
-OFFSET_SECONDS = 0.3
-TAU_SECONDS = 0.5
+OFFSET_SECONDS = 0.5
+TSOE_SECONDS = 0.5
 
 def time_to_samples(seconds: float, fs: float) -> int:
     return round(seconds * fs)
@@ -31,10 +32,38 @@ def cycle_fs(cycle: Cycle) -> float:
     return 1.0 / (cycle.time[1] - cycle.time[0])
 
 
+def downsample_cycle(cycle: Cycle, factor: int) -> Cycle:
+    """Downsample every signal by `factor` with an anti-alias filter.
+    Continuous waveforms go through scipy.signal.decimate (low-pass then drop samples).
+    `time` and the `insexp` step function are plain-sliced, so step edge is preserved.
+    """
+    if factor <= 1:
+        return cycle
+
+    def down(signal: np.ndarray) -> np.ndarray:
+        return decimate(signal, factor)
+
+    downsampled_length = len(range(0, cycle.pressure.size, factor))
+    pmus_mag = (
+        np.full(downsampled_length, np.nan)
+        if np.all(np.isnan(cycle.pmus_mag))
+        else down(cycle.pmus_mag)
+    )
+    return Cycle(
+        time=cycle.time[::factor],
+        pressure=down(cycle.pressure),
+        flow=down(cycle.flow),
+        volume=down(cycle.volume),
+        pmus=down(cycle.pmus),
+        pmus_mag=pmus_mag,
+        insexp=cycle.insexp[::factor],
+    )
+
+
 def evaluate(cycle: Cycle, R: float, C_ext: float) -> float:
     R_ml = R / 1000.0
     E = 1.0 / C_ext
-    tau_soe = time_to_samples(TAU_SECONDS, cycle_fs(cycle))
+    tau_soe = time_to_samples(TSOE_SECONDS, cycle_fs(cycle))
     try:
         # threads=1: one core per solve, joblib drives the outer parallelism
         pmus_hat, _, _ = pmus_miqp_fixed(
@@ -50,16 +79,19 @@ def evaluate(cycle: Cycle, R: float, C_ext: float) -> float:
         return float("nan")
 
 
-def load_cycle(path: Path, cycle_idx: int) -> Cycle:
+def load_cycle(
+    path: Path, cycle_idx: int, downsample_factor: int = 1, peep: float = PEEP,
+) -> Cycle:
     data, fs = load_recording(path)
     ins_marks, exp_marks = get_ins_exp_marks(path, data, fs)
-    return extract_single_cycle(
+    cycle = extract_single_cycle(
         df=data,
         ins_mark=int(ins_marks[cycle_idx]),
         next_ins_mark=int(ins_marks[cycle_idx + 1]),
         exp_mark=int(exp_marks[cycle_idx]),
-        peep=PEEP, offset=time_to_samples(OFFSET_SECONDS, fs),
+        peep=peep, offset=time_to_samples(OFFSET_SECONDS, fs),
     )
+    return downsample_cycle(cycle, downsample_factor)
 
 
 def lse_true(cycle: Cycle) -> tuple[float, float]:
@@ -110,7 +142,7 @@ def plot_surface(
 
 
 def plot_best(cycle: Cycle, R_best: float, C_best: float) -> tuple[plt.Figure, np.ndarray]:
-    tau_soe = time_to_samples(TAU_SECONDS, cycle_fs(cycle))
+    tau_soe = time_to_samples(TSOE_SECONDS, cycle_fs(cycle))
     R_ml_best, E_best = R_best / 1000.0, 1.0 / C_best
     pmus_best, _, _ = pmus_miqp_fixed(cycle, R_ml_best, E_best, l2_reg=True, tau_soe=tau_soe)
 
@@ -131,11 +163,11 @@ def plot_best(cycle: Cycle, R_best: float, C_best: float) -> tuple[plt.Figure, n
     time = cycle.time - cycle.time[0]
     flow_ml_s = cycle.flow * 1000.0 / 60.0
     paw_est_lse_true = cycle.pmus + R_ml_lse * flow_ml_s + E_lse * cycle.volume
-    axes[0].plot(
-        time, paw_est_lse_true, "tab:purple", linestyle="--",
-        label="paw_est (pmus_true @ LSE (R, C))",
-    )
-    axes[0].legend(loc="upper right", fontsize=9)
+    #axes[0].plot(
+    #    time, paw_est_lse_true, "tab:purple", linestyle="--",
+    #    label="paw_est (pmus_true @ LSE (R, C))",
+    #)
+    #axes[0].legend(loc="upper right", fontsize=9)
 
     # reference pmus_mag waveform on the pmus panel, if available
     if not np.all(np.isnan(cycle.pmus_mag)):
@@ -167,6 +199,14 @@ def main():
         help="parallel workers (each spawns its own Gurobi env)"
     )
     parser.add_argument(
+        "--downsample", type=int, default=1,
+        help="anti-aliased downsample factor for the cycle (2 = 100->50 Hz; 1 = off)"
+    )
+    parser.add_argument(
+        "--peep", type=float, default=PEEP,
+        help=f"PEEP subtracted from pressure (default: {PEEP})"
+    )
+    parser.add_argument(
         "--load", type=Path, default=None,
         help="path to a saved heatmap .npz; skips the grid search and just plots"
     )
@@ -196,10 +236,11 @@ def main():
         plt.show()
         return
 
-    cycle = load_cycle(args.path, args.cycle)
+    cycle = load_cycle(args.path, args.cycle, args.downsample, args.peep)
 
     R_true, C_true = lse_true(cycle)
-    print(f"PEEP: {PEEP}")
+    print(f"PEEP: {args.peep}")
+    print(f"downsample: {args.downsample}x -> fs = {cycle_fs(cycle):.1f} Hz, n = {cycle.pressure.size}")
     print(f"LSE-true: R = {R_true:.2f}, C = {C_true:.2f}")
 
     # show the raw cycle to be analyzed before starting the grid search
@@ -229,7 +270,8 @@ def main():
         C_values=C_values,
         R_true=R_true, C_true=C_true,
         R_best=R_best, C_best=C_best, cost_best=cost_best,
-        cycle_idx=args.cycle, peep=PEEP, offset_seconds=OFFSET_SECONDS,
+        cycle_idx=args.cycle, peep=args.peep,
+        offset_seconds=OFFSET_SECONDS, tsoe_seconds=TSOE_SECONDS,
         cycle=np.array(cycle, dtype=object),
     )
     print(f"saved results to {out_path.name}")
